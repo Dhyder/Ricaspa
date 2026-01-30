@@ -1,0 +1,72 @@
+/* Form Status Messages */
+.php-email-form .loading,
+.php-email-form .error-message,
+.php-email-form .sent-message {
+  display: none;
+  margin: 15px 0;
+  padding: 15px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.php-email-form .loading {
+  display: none;
+  background: #fff;
+  text-align: center;
+  padding: 15px;
+  color: #666;
+}
+
+.php-email-form .loading:before {
+  content: "";
+  display: inline-block;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  margin: 0 10px -6px 0;
+  border: 3px solid #e03a3c;
+  border-top-color: #fff;
+  animation: animate-loading 1s linear infinite;
+}
+
+.php-email-form .error-message {
+  display: none;
+  background: #df1529;
+  color: #fff;
+  text-align: center;
+}
+
+.php-email-form .sent-message {
+  display: none;
+  background: #059652;
+  color: #fff;
+  text-align: center;
+}
+
+@keyframes animate-loading {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Button disabled state */
+.php-email-form button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Form validation styles */
+.php-email-form input:invalid:not(:placeholder-shown),
+.php-email-form textarea:invalid:not(:placeholder-shown),
+.php-email-form select:invalid:not(:placeholder-shown) {
+  border-color: #dc3545;
+}
+
+.php-email-form input:valid:not(:placeholder-shown),
+.php-email-form textarea:valid:not(:placeholder-shown),
+.php-email-form select:valid:not(:placeholder-shown) {
+  border-color: #28a745;
+}
