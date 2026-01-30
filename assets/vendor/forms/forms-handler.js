@@ -105,13 +105,13 @@ document.addEventListener('DOMContentLoaded', function() {
   // Contact Form
   const contactForm = document.querySelector('form[action*="contact.php"]');
   if (contactForm) {
-    new MinimalFormHandler(contactForm, '152c4088-a50f-463f-bea6-ed753762819c');
+    new MinimalFormHandler(contactForm, '10be60a7-1a71-4b3a-be3a-834e48e9508e');
   }
 
-  // Booking Form
+  // Booking Form  vm
   const bookingForm = document.querySelector('form[action*="book-a-table.php"]');
   if (bookingForm) {
-    new MinimalFormHandler(bookingForm, 'f5c05ada-a8ca-4222-bccf-a2a61169ee77');
+    new MinimalFormHandler(bookingForm, '933028d5-9b33-4467-abd1-44c2ebbe831f');
   }
 
   // Optional: Add date restrictions for booking form
