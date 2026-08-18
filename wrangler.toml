@@ -4,4 +4,4 @@ pages_build_output_dir = "."
 
 [[kv_namespaces]]
 binding = "VOUCHERS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "20e21678c21f48718b235646ff753777"
