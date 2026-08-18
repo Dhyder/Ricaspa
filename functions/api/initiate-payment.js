@@ -59,6 +59,6 @@ export async function onRequestPost(context) {
 
     return json({ success: true, ref, redirectUrl: checkout.url });
   } catch (err) {
-    return json({ error: "Could not start payment", detail: String(err) }, 502);
+    return json({ error: "Could not start payment", detail: String(err) }, 500);
   }
 }
