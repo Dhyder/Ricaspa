@@ -81,7 +81,6 @@ webhook still fires and the voucher still gets created and emailed.
 ## Going live
 
 Once you're ready for real payments:
-
 1. Switch to your **Live** publishable/secret keys from the same API Keys page
 2. Set up a second webhook entry in the dashboard pointing at the same URL,
    using your live keys' challenge (or reuse the same challenge if IntaSend's
