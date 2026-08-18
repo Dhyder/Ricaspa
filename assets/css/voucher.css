@@ -1,0 +1,175 @@
+/* Voucher Section — matches .contact .contact-form-wrapper conventions */
+
+.vouchers .voucher-wrapper {
+  background-color: var(--surface-color);
+  border-radius: 12px;
+  box-shadow: 0 5px 25px rgba(0, 0, 0, 0.05);
+  padding: 40px;
+}
+
+.vouchers .voucher-wrapper h2 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.vouchers .voucher-intro {
+  margin-bottom: 30px;
+  color: color-mix(in srgb, var(--default-color), transparent 20%);
+}
+
+/* Type toggle */
+.vouchers .type-toggle {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.vouchers .type-toggle button {
+  flex: 1;
+  padding: 12px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--default-color), transparent 80%);
+  background-color: transparent;
+  color: var(--default-color);
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.vouchers .type-toggle button.active {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: var(--contrast-color);
+}
+
+.vouchers .type-toggle button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vouchers .soon-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: color-mix(in srgb, var(--default-color), transparent 80%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.vouchers .service-price-note {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-color);
+}
+
+.vouchers .form-group {
+  margin-bottom: 20px;
+}
+
+.vouchers .form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+  color: color-mix(in srgb, var(--default-color), transparent 15%);
+}
+
+.vouchers .form-group .form-control {
+  width: 100%;
+  border-radius: 8px;
+  padding: 12px 15px;
+  height: 3.5rem;
+  color: var(--default-color);
+  background-color: var(--surface-color);
+  font-size: 15px;
+  border: 1px solid color-mix(in srgb, var(--default-color), transparent 80%);
+}
+
+.vouchers .form-group textarea.form-control {
+  height: 110px;
+  resize: none;
+  padding-top: 15px;
+}
+
+.vouchers .form-group .form-control:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--accent-color), transparent 90%);
+}
+
+.vouchers .form-group .form-control::placeholder {
+  color: color-mix(in srgb, var(--default-color), transparent 40%);
+}
+
+.vouchers .test-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--default-color), transparent 30%);
+  margin-bottom: 20px;
+}
+
+.vouchers .btn-submit {
+  background-color: var(--accent-color);
+  border: none;
+  color: var(--contrast-color);
+  padding: 14px 30px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  border-radius: 8px;
+  width: 100%;
+  transition: all 0.3s ease;
+  box-shadow: 0 5px 15px color-mix(in srgb, var(--accent-color), transparent 70%);
+  cursor: pointer;
+}
+
+.vouchers .btn-submit:hover {
+  background-color: color-mix(in srgb, var(--accent-color), transparent 15%);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent-color), transparent 60%);
+}
+
+.vouchers .btn-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+.vouchers .status-msg {
+  margin-top: 16px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.vouchers .status-msg.success {
+  color: #6fbf73;
+}
+
+.vouchers .status-msg.error {
+  color: #e07a7a;
+}
+
+.vouchers .rv-hint {
+  display: block;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--default-color), transparent 45%);
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .vouchers .voucher-wrapper {
+    padding: 24px;
+  }
+
+  .vouchers .type-toggle {
+    flex-direction: column;
+  }
+}

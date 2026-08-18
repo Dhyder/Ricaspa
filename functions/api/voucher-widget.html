@@ -1,0 +1,117 @@
+<!--
+  Rica Spa — Voucher Purchase Widget
+  Drop this section into any page on ricaspa.beauty (e.g. a /vouchers page).
+  It posts to /api/create-voucher (the Cloudflare Pages Function).
+
+  PROTOTYPE NOTE: the "Test Mode" checkbox bypasses real payment so you can
+  test the voucher + email flow today. Remove it once Paystack/Flutterwave/
+  M-Pesa is wired in, and replace the submit handler's testMode:true with
+  the real payment confirmation step.
+-->
+<section id="rica-voucher" style="max-width:480px;margin:0 auto;padding:32px 20px;font-family:'Jost',Arial,sans-serif;">
+  <h2 style="font-family:'Fraunces',Georgia,serif;font-size:24px;color:#16241C;margin:0 0 6px;">Give a Rica Spa voucher</h2>
+  <p style="font-size:14px;color:#5b5344;margin:0 0 24px;">Choose an amount or treatment, we email it straight to you or someone you love.</p>
+
+  <form id="voucherForm">
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button type="button" class="rv-type active" data-type="amount" style="flex:1;padding:10px;border:1px solid #cabf9e;border-radius:6px;background:#16241C;color:#F8F3E6;cursor:pointer;font-size:12px;">Gift amount</button>
+      <button type="button" class="rv-type" data-type="service" style="flex:1;padding:10px;border:1px solid #cabf9e;border-radius:6px;background:#fff;color:#5b5344;cursor:pointer;font-size:12px;">Service</button>
+      <button type="button" class="rv-type" data-type="discount" style="flex:1;padding:10px;border:1px solid #cabf9e;border-radius:6px;background:#fff;color:#5b5344;cursor:pointer;font-size:12px;">Discount</button>
+    </div>
+
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#7a715c;margin-bottom:5px;">Amount (KES)</label>
+    <input id="valueInput" required style="width:100%;padding:10px;border:1px solid #cabf9e;border-radius:6px;margin-bottom:16px;font-size:14px;" value="5000">
+
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#7a715c;margin-bottom:5px;">Recipient name</label>
+    <input id="toName" required style="width:100%;padding:10px;border:1px solid #cabf9e;border-radius:6px;margin-bottom:16px;font-size:14px;" placeholder="Wanjiru">
+
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#7a715c;margin-bottom:5px;">Your name (From)</label>
+    <input id="fromName" style="width:100%;padding:10px;border:1px solid #cabf9e;border-radius:6px;margin-bottom:16px;font-size:14px;" placeholder="Rica Spa Team">
+
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#7a715c;margin-bottom:5px;">Message (optional)</label>
+    <textarea id="voucherMessage" style="width:100%;padding:10px;border:1px solid #cabf9e;border-radius:6px;margin-bottom:16px;font-size:14px;min-height:60px;"></textarea>
+
+    <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#7a715c;margin-bottom:5px;">Your email (voucher gets sent here)</label>
+    <input id="buyerEmail" type="email" required style="width:100%;padding:10px;border:1px solid #cabf9e;border-radius:6px;margin-bottom:20px;font-size:14px;" placeholder="you@email.com">
+
+    <!-- REMOVE this block once real payment is wired in -->
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#7a715c;margin-bottom:16px;">
+      <input type="checkbox" id="testMode" checked> Test mode (skip payment, send voucher immediately)
+    </label>
+
+    <button type="submit" id="submitBtn" style="width:100%;padding:13px;background:#B9924A;color:#16241C;border:none;border-radius:6px;font-weight:600;font-size:14px;cursor:pointer;">
+      Get voucher
+    </button>
+
+    <p id="statusMsg" style="margin-top:14px;font-size:13px;"></p>
+  </form>
+</section>
+
+<script>
+(function () {
+  let currentType = 'amount';
+  const typeConfig = {
+    amount:   { label: 'Amount (KES)', placeholder: '5000' },
+    service:  { label: 'Service name', placeholder: 'Full Body Massage' },
+    discount: { label: 'Discount (%)', placeholder: '20' },
+  };
+
+  document.querySelectorAll('.rv-type').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.rv-type').forEach(b => {
+        b.style.background = '#fff'; b.style.color = '#5b5344';
+      });
+      btn.style.background = '#16241C'; btn.style.color = '#F8F3E6';
+      currentType = btn.dataset.type;
+      const cfg = typeConfig[currentType];
+      document.querySelector('label[for=""]'); // noop, keep label update below
+      const valueLabel = document.querySelectorAll('#voucherForm label')[0];
+      valueLabel.textContent = cfg.label;
+      document.getElementById('valueInput').value = cfg.placeholder;
+    });
+  });
+
+  document.getElementById('voucherForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const statusMsg = document.getElementById('statusMsg');
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending...';
+    statusMsg.textContent = '';
+
+    const payload = {
+      type: currentType,
+      value: document.getElementById('valueInput').value,
+      toName: document.getElementById('toName').value,
+      fromName: document.getElementById('fromName').value,
+      message: document.getElementById('voucherMessage').value,
+      buyerEmail: document.getElementById('buyerEmail').value,
+      testMode: document.getElementById('testMode').checked,
+    };
+
+    try {
+      const res = await fetch('/api/create-voucher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        statusMsg.style.color = '#a33';
+        statusMsg.textContent = data.error || 'Something went wrong.';
+      } else {
+        statusMsg.style.color = '#2a6b3f';
+        statusMsg.textContent = `Voucher sent to ${payload.buyerEmail}. Code: ${data.code}`;
+        document.getElementById('voucherForm').reset();
+      }
+    } catch (err) {
+      statusMsg.style.color = '#a33';
+      statusMsg.textContent = 'Network error, please try again.';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Get voucher';
+    }
+  });
+})();
+</script>

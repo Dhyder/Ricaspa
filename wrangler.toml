@@ -1,0 +1,7 @@
+name = "ricaspa"
+compatibility_date = "2026-08-01"
+pages_build_output_dir = "."
+
+[[kv_namespaces]]
+binding = "VOUCHERS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
