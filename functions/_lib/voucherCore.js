@@ -59,7 +59,9 @@ export function resolveVoucherOrder(body) {
     resolvedValue = String(price);
   } else {
     const numeric = Number(value);
-    if (!numeric || numeric < 500) return { error: "Enter a valid voucher amount" };
+    // TEMP: lowered from 500 to 1 for a real-money smoke test. Restore to
+    // 500 (or your actual minimum) before this goes live for real customers.
+    if (!numeric || numeric < 1) return { error: "Enter a valid voucher amount" };
     resolvedValue = String(numeric);
   }
 
