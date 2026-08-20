@@ -1,15 +1,23 @@
 // POST /api/initiate-payment
 //
+// IMPORTANT: this endpoint does NOT call IntaSend directly. Cloudflare
+// Workers share outbound IPs across all Workers customers, and IntaSend's
+// own Cloudflare firewall is blocking that shared IP range (Cloudflare
+// error 1106 — confirmed via direct testing). Rather than wait on IntaSend
+// support to whitelist it, the checkout-creation call happens client-side
+// instead, using the browser's own IP. The publishable key is safe to
+// expose in the browser — that's what "publishable" means.
+//
 // Real payment flow:
 //   1. Validate + resolve the voucher form data
-//   2. Ask IntaSend for a checkout URL, and stash the voucher details +
-//      IntaSend's checkout_id/signature in KV under a temporary "pending:REF" key
-//   3. Frontend redirects the browser there — customer pays via M-Pesa or card
-//   4. IntaSend calls /api/payment-webhook when the payment completes, which is
-//      what actually finalizes and emails the voucher (not this endpoint)
+//   2. Stash the voucher details in KV under a temporary "pending:REF" key
+//   3. Return the ref + publishable key to the browser
+//   4. Browser calls IntaSend's checkout API directly, gets a redirect URL,
+//      and sends the customer there
+//   5. IntaSend calls /api/payment-webhook when payment completes — that
+//      inbound direction isn't blocked, only our outbound calls to them are
 
 import { resolveVoucherOrder, generateRef, json } from "../_lib/voucherCore.js";
-import { createCheckout } from "../_lib/intasend.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -26,39 +34,34 @@ export async function onRequestPost(context) {
 
   const ref = generateRef();
 
+  try {
+    await env.VOUCHERS.put(
+      `pending:${ref}`,
+      JSON.stringify({ order }),
+      { expirationTtl: 60 * 60 * 2 } // pending orders expire after 2 hours if unpaid
+    );
+  } catch (err) {
+    return json({ error: "Could not start order", detail: String(err) }, 500);
+  }
+
   const description =
     order.type === "amount"
       ? `Rica Spa gift voucher — KES ${order.value}`
       : `Rica Spa voucher — ${order.serviceName}`;
 
-  try {
-    const checkout = await createCheckout(env, {
-      ref,
+  return json({
+    success: true,
+    ref,
+    publishableKey: env.INTASEND_PUBLISHABLE_KEY,
+    checkoutPayload: {
       amount: Number(order.value),
-      description,
-      callbackUrl: `https://ricaspa.beauty/vouchers?ref=${ref}`,
-      billing: {
-        email: order.buyerEmail,
-        phone: order.buyerPhone,
-        name: order.buyerName,
-      },
-    });
-
-    // Stash the voucher details + IntaSend's checkout reference together,
-    // so both the webhook and the status-poll endpoint can find everything
-    // they need under one key.
-    await env.VOUCHERS.put(
-      `pending:${ref}`,
-      JSON.stringify({
-        order,
-        checkoutId: checkout.id,
-        signature: checkout.signature,
-      }),
-      { expirationTtl: 60 * 60 * 2 } // pending orders expire after 2 hours if unpaid
-    );
-
-    return json({ success: true, ref, redirectUrl: checkout.url });
-  } catch (err) {
-    return json({ error: "Could not start payment", detail: String(err) }, 500);
-  }
+      currency: "KES",
+      api_ref: ref,
+      redirect_url: `https://ricaspa.beauty/vouchers?ref=${ref}`,
+      email: order.buyerEmail,
+      phone_number: order.buyerPhone || "",
+      first_name: order.buyerName,
+      comment: description,
+    },
+  });
 }

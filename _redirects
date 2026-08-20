@@ -1,0 +1,5 @@
+curl -s -X POST https://api.intasend.com/api/v1/checkout/ \
+  -H "Content-Type: application/json" \
+  -H "X-IntaSend-Public-API-Key: ISPubKey_live_34e3e88d-764b-4454-b16c-716953562a51" \
+  -d '{"amount":100,"currency":"KES","api_ref":"curltest123","email":"test@example.com","first_name":"Test"}' \
+  -w "\nHTTP_STATUS:%{http_code}\n"

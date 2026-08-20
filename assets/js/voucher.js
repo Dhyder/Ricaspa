@@ -153,8 +153,10 @@
           updateGiftMode();
           updateServicePriceDisplay();
         }
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Get voucher';
       } else {
-        submitBtn.textContent = 'Redirecting to payment...';
+        submitBtn.textContent = 'Preparing checkout...';
         const res = await fetch('/api/initiate-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -165,15 +167,47 @@
         if (!res.ok) {
           statusEl.classList.add('error');
           statusEl.textContent = data.error || 'Could not start payment.';
-        } else {
-          window.location.href = data.redirectUrl;
-          return; // leaving the page
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Get voucher';
+          return;
         }
+
+        submitBtn.textContent = 'Opening checkout...';
+
+        const cp = data.checkoutPayload;
+        const trigger = document.getElementById('intasendTrigger');
+        trigger.setAttribute('data-amount', cp.amount);
+        trigger.setAttribute('data-currency', cp.currency);
+        trigger.setAttribute('data-email', cp.email);
+        trigger.setAttribute('data-phone_number', cp.phone_number || '');
+        trigger.setAttribute('data-first_name', cp.first_name || '');
+        trigger.setAttribute('data-api_ref', cp.api_ref);
+
+        const isLive = data.publishableKey && data.publishableKey.startsWith('ISPubKey_live_');
+
+        new window.IntaSend({
+          publicAPIKey: data.publishableKey,
+          live: isLive,
+        })
+          .on('COMPLETE', () => {
+            window.location.href = `/vouchers?ref=${encodeURIComponent(data.ref)}`;
+          })
+          .on('FAILED', () => {
+            statusEl.classList.add('error');
+            statusEl.textContent = 'Payment did not go through. You can try again.';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Get voucher';
+          })
+          .on('IN-PROGRESS', () => {
+            submitBtn.textContent = 'Payment in progress...';
+          });
+
+        trigger.click();
+        return; // IntaSend's checkout popup takes over from here
       }
     } catch (err) {
       statusEl.classList.add('error');
       statusEl.textContent = 'Network error, please try again.';
-    } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Get voucher';
     }

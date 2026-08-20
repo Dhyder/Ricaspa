@@ -343,6 +343,17 @@
 
   <!-- Main JS File -->
   <script src="assets/js/main.js"></script>
+  <!-- IntaSend Inline SDK - the real browser-safe integration.
+       Raw fetch() to their REST API from the browser is blocked (server-to-server only);
+       this SDK handles checkout without a CORS-blocked direct API call. -->
+  <script src="https://unpkg.com/intasend-inlinejs-sdk@4.0.5/build/intasend-inline.js"></script>
+  <!-- Hidden trigger button the SDK binds to at page load. voucher.js sets its
+       data-* attributes right before a real click, so it always reflects the
+       current form state. -->
+  <button id="intasendTrigger" class="intaSendPayButton" style="display:none;"
+    data-amount="" data-currency="KES" data-email="" data-phone_number=""
+    data-first_name="" data-last_name="" data-api_ref=""></button>
+
   <script src="assets/js/voucher.js"></script>
 
 </body>
