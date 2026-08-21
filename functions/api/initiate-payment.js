@@ -19,8 +19,28 @@
 
 import { resolveVoucherOrder, generateRef, json } from "../_lib/voucherCore.js";
 
+// Basic abuse deterrent: max 8 order attempts per IP per 10 minutes. This
+// isn't perfectly precise under concurrent requests (KV is eventually
+// consistent, not transactional), but it's enough to stop casual spam/bots
+// flooding KV with junk pending orders. For stronger protection, Cloudflare's
+// own dashboard-level Rate Limiting Rules (Security > WAF) can be layered on
+// top without touching code.
+async function isRateLimited(env, ip) {
+  const key = `ratelimit:${ip}`;
+  const current = await env.VOUCHERS.get(key);
+  const count = current ? parseInt(current, 10) : 0;
+  if (count >= 8) return true;
+  await env.VOUCHERS.put(key, String(count + 1), { expirationTtl: 600 });
+  return false;
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
+
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  if (await isRateLimited(env, ip)) {
+    return json({ error: "Too many attempts. Please wait a few minutes and try again." }, 429);
+  }
 
   let body;
   try {

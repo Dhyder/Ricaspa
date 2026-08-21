@@ -1,15 +1,11 @@
 // GET /api/order-status?ref=REF
 //
 // Lets the frontend check whether a pending order has been finalized yet.
-//
-// This intentionally does NOT call IntaSend's status API — that would be
-// another outbound call from the Worker, which is blocked by IntaSend's
-// firewall (same root cause as initiate-payment.js). Instead, this just
-// checks our own KV: the webhook (/api/payment-webhook) is what actually
-// finalizes orders and deletes the "pending:REF" key, so its absence means
-// either it's done, or it never happened. We can't distinguish a genuine
-// failure from "still pending" this way, but pending orders expire after 2
-// hours anyway, and the webhook is reliable for the completed case.
+// Reads explicit state markers written by /api/payment-webhook:
+//   completed:REF — payment confirmed, voucher created (returns the code)
+//   failed:REF    — payment failed/canceled, or finalization errored
+//   pending:REF   — still waiting
+//   (none found)  — expired or never existed
 
 import { json } from "../_lib/voucherCore.js";
 
@@ -20,7 +16,23 @@ export async function onRequestGet(context) {
 
   if (!ref) return json({ error: "Missing ref" }, 400);
 
-  const pendingRaw = await env.VOUCHERS.get(`pending:${ref}`);
+  const completedRaw = await env.VOUCHERS.get(`completed:${ref}`);
+  if (completedRaw) {
+    const { code, emailWarning } = JSON.parse(completedRaw);
+    return json({ status: "completed", code, emailWarning: emailWarning || null });
+  }
 
-  return json({ status: pendingRaw ? "pending" : "completed" });
+  const failedRaw = await env.VOUCHERS.get(`failed:${ref}`);
+  if (failedRaw) {
+    return json({ status: "failed" });
+  }
+
+  const pendingRaw = await env.VOUCHERS.get(`pending:${ref}`);
+  if (pendingRaw) {
+    return json({ status: "pending" });
+  }
+
+  // No record under any state — either it expired (2hr TTL on pending) or
+  // the ref was never valid to begin with.
+  return json({ status: "unknown" });
 }

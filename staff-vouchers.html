@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rica Spa — Voucher Desk</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<style>
+  body{font-family:system-ui,sans-serif;background:#16241C;color:#F8F3E6;max-width:480px;margin:0 auto;padding:32px 20px;}
+  h1{font-size:20px;margin-bottom:4px;}
+  p.sub{color:rgba(248,243,230,0.6);font-size:13px;margin-top:0;margin-bottom:24px;}
+  input{width:100%;padding:12px;border-radius:8px;border:1px solid rgba(248,243,230,0.25);background:rgba(248,243,230,0.06);color:#F8F3E6;font-size:16px;box-sizing:border-box;margin-bottom:10px;}
+  button{width:100%;padding:12px;border-radius:8px;border:none;font-weight:600;font-size:15px;cursor:pointer;margin-bottom:10px;}
+  .btn-lookup{background:rgba(248,243,230,0.12);color:#F8F3E6;}
+  .btn-redeem{background:#B9924A;color:#16241C;}
+  .btn-redeem:disabled{opacity:0.4;cursor:not-allowed;}
+  #result{margin-top:20px;padding:16px;border-radius:8px;background:rgba(248,243,230,0.06);font-size:14px;line-height:1.6;display:none;}
+  #result.error{background:rgba(224,122,122,0.15);color:#e07a7a;}
+  #result.ok{background:rgba(111,191,115,0.15);}
+  .row{display:flex;justify-content:space-between;margin-bottom:4px;}
+  .row b{color:#B9924A;}
+  #gate{max-width:320px;margin:80px auto;text-align:center;}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>Staff access</h1>
+  <p class="sub">Enter the voucher desk passphrase.</p>
+  <input id="secretInput" type="password" placeholder="Passphrase">
+  <button class="btn-lookup" onclick="unlock()">Unlock</button>
+</div>
+
+<div id="desk" style="display:none;">
+  <h1>Voucher Desk</h1>
+  <p class="sub">Look up or redeem a customer's voucher code.</p>
+
+  <input id="codeInput" type="text" placeholder="RICA-XXXX-XXXX" autocapitalize="characters">
+  <button class="btn-lookup" onclick="lookup()">Look up</button>
+  <button class="btn-redeem" id="redeemBtn" onclick="redeem()" disabled>Mark as redeemed</button>
+
+  <div id="result"></div>
+</div>
+
+<script>
+  let staffSecret = '';
+
+  function unlock() {
+    staffSecret = document.getElementById('secretInput').value;
+    if (!staffSecret) return;
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('desk').style.display = '';
+  }
+
+  function showResult(data, isError) {
+    const el = document.getElementById('result');
+    el.style.display = 'block';
+    el.className = isError ? 'error' : 'ok';
+
+    if (isError) {
+      el.innerHTML = `<div>${data.error || 'Something went wrong.'}</div>`;
+      document.getElementById('redeemBtn').disabled = true;
+      return;
+    }
+
+    const v = data.voucher;
+    const valueText = v.type === 'amount' ? `KES ${Number(v.value).toLocaleString()}` : (v.serviceName || v.value);
+    el.innerHTML = `
+      <div class="row"><span>Status</span><b>${v.status.toUpperCase()}</b></div>
+      <div class="row"><span>Value</span><b>${valueText}</b></div>
+      <div class="row"><span>To</span><span>${v.toName}</span></div>
+      <div class="row"><span>Expires</span><span>${new Date(v.expiresAt).toLocaleDateString()}</span></div>
+      ${v.redeemedAt ? `<div class="row"><span>Redeemed</span><span>${new Date(v.redeemedAt).toLocaleString()}</span></div>` : ''}
+    `;
+    document.getElementById('redeemBtn').disabled = v.status === 'redeemed';
+  }
+
+  async function callApi(action) {
+    const code = document.getElementById('codeInput').value.trim();
+    if (!code) return;
+    try {
+      const res = await fetch('/api/redeem-voucher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Staff-Secret': staffSecret },
+        body: JSON.stringify({ code, action }),
+      });
+      const data = await res.json();
+      showResult(data, !res.ok);
+    } catch {
+      showResult({ error: 'Network error, please try again.' }, true);
+    }
+  }
+
+  function lookup() { callApi('lookup'); }
+  function redeem() { callApi('redeem'); }
+</script>
+
+</body>
+</html>

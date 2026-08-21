@@ -1,6 +1,6 @@
 // Shared voucher logic: service catalog, code generation, email templates,
 // and the "finalize" step (save to KV + send emails) used by both the
-// test-mode endpoint and the real Pesapal payment flow.
+// test-mode endpoint and the real IntaSend payment flow.
 
 // Keep this list in sync with SERVICES in assets/js/voucher.js
 export const SERVICES = {
@@ -21,10 +21,12 @@ export const SERVICES = {
 
 export function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
   let code = "RICA-";
   for (let i = 0; i < 8; i++) {
     if (i === 4) code += "-";
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += chars[bytes[i] % chars.length];
   }
   return code;
 }
@@ -61,7 +63,7 @@ export function resolveVoucherOrder(body) {
     const numeric = Number(value);
     // TEMP: lowered from 500 to 1 for a real-money smoke test. Restore to
     // 500 (or your actual minimum) before this goes live for real customers.
-    if (!numeric || numeric < 1) return { error: "Enter a valid voucher amount" };
+    if (!numeric || numeric < 500) return { error: "Enter a valid voucher amount" };
     resolvedValue = String(numeric);
   }
 
@@ -142,6 +144,7 @@ export async function finalizeVoucher(env, order) {
   }
 
   const wentToRecipientOnly = record.giftingOthers && record.recipientEmail;
+  let emailWarning = null;
   if (wentToRecipientOnly) {
     try {
       const confirmHtml = buildConfirmationEmail({
@@ -154,7 +157,7 @@ export async function finalizeVoucher(env, order) {
         code,
       });
 
-      await fetch("https://api.resend.com/emails", {
+      const confirmRes = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${env.RESEND_API_KEY}`,
@@ -167,12 +170,19 @@ export async function finalizeVoucher(env, order) {
           html: confirmHtml,
         }),
       });
-    } catch {
-      // Voucher itself already delivered — don't fail on the confirmation copy.
+
+      if (!confirmRes.ok) {
+        const detail = await confirmRes.text();
+        emailWarning = "Buyer confirmation email failed: " + detail;
+      }
+    } catch (err) {
+      // Voucher itself already delivered — don't fail the whole order on
+      // the confirmation copy, but do record it so it's visible.
+      emailWarning = "Buyer confirmation email failed: " + String(err);
     }
   }
 
-  return { code, record };
+  return { code, record, emailWarning };
 }
 
 function labelFor(type) {

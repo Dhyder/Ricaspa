@@ -22,11 +22,21 @@
       const data = await res.json();
 
       if (data.status === 'completed') {
-        textEl.textContent = 'Payment confirmed. Your voucher has been emailed — check your inbox.';
+        textEl.textContent = data.emailWarning
+          ? 'Payment confirmed and your voucher was created, but the email may not have sent. Contact us with your reference if it does not arrive shortly.'
+          : 'Payment confirmed. Your voucher has been emailed — check your inbox.';
         return;
       }
       if (data.status === 'failed') {
         textEl.textContent = 'This payment did not go through. No voucher was created. You can try again below.';
+        setTimeout(() => {
+          statusView.style.display = 'none';
+          formView.style.display = '';
+        }, 4000);
+        return;
+      }
+      if (data.status === 'unknown') {
+        textEl.textContent = 'We could not find this order — it may have expired. Please start again below.';
         setTimeout(() => {
           statusView.style.display = 'none';
           formView.style.display = '';
@@ -117,7 +127,6 @@
 
     const buyerName = document.getElementById('buyerName').value;
     const giftingOthers = giftOthersCheckbox.checked;
-    const testMode = document.getElementById('testMode').checked;
 
     const payload = {
       type: currentType,
@@ -130,81 +139,57 @@
       recipientEmail: giftingOthers ? document.getElementById('recipientEmail').value : '',
       fromName: giftingOthers ? buyerName : 'Rica Spa',
       message: document.getElementById('voucherMessage').value,
-      testMode,
     };
 
     try {
-      if (testMode) {
-        submitBtn.textContent = 'Sending...';
-        const res = await fetch('/api/create-voucher', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
+      submitBtn.textContent = 'Preparing checkout...';
+      const res = await fetch('/api/initiate-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
 
-        if (!res.ok) {
-          statusEl.classList.add('error');
-          statusEl.textContent = data.error || 'Something went wrong.';
-        } else {
-          statusEl.classList.add('success');
-          statusEl.textContent = `Voucher sent. Code: ${data.code}`;
-          form.reset();
-          updateGiftMode();
-          updateServicePriceDisplay();
-        }
+      if (!res.ok) {
+        statusEl.classList.add('error');
+        statusEl.textContent = data.error || 'Could not start payment.';
         submitBtn.disabled = false;
         submitBtn.textContent = 'Get voucher';
-      } else {
-        submitBtn.textContent = 'Preparing checkout...';
-        const res = await fetch('/api/initiate-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
+        return;
+      }
 
-        if (!res.ok) {
+      submitBtn.textContent = 'Opening checkout...';
+
+      const cp = data.checkoutPayload;
+      const trigger = document.getElementById('intasendTrigger');
+      trigger.setAttribute('data-amount', cp.amount);
+      trigger.setAttribute('data-currency', cp.currency);
+      trigger.setAttribute('data-email', cp.email);
+      trigger.setAttribute('data-phone_number', cp.phone_number || '');
+      trigger.setAttribute('data-first_name', cp.first_name || '');
+      trigger.setAttribute('data-api_ref', cp.api_ref);
+
+      const isLive = data.publishableKey && data.publishableKey.startsWith('ISPubKey_live_');
+
+      new window.IntaSend({
+        publicAPIKey: data.publishableKey,
+        live: isLive,
+      })
+        .on('COMPLETE', () => {
+          window.location.href = `/vouchers?ref=${encodeURIComponent(data.ref)}`;
+        })
+        .on('FAILED', () => {
           statusEl.classList.add('error');
-          statusEl.textContent = data.error || 'Could not start payment.';
+          statusEl.textContent = 'Payment did not go through. You can try again.';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Get voucher';
-          return;
-        }
-
-        submitBtn.textContent = 'Opening checkout...';
-
-        const cp = data.checkoutPayload;
-        const trigger = document.getElementById('intasendTrigger');
-        trigger.setAttribute('data-amount', cp.amount);
-        trigger.setAttribute('data-currency', cp.currency);
-        trigger.setAttribute('data-email', cp.email);
-        trigger.setAttribute('data-phone_number', cp.phone_number || '');
-        trigger.setAttribute('data-first_name', cp.first_name || '');
-        trigger.setAttribute('data-api_ref', cp.api_ref);
-
-        const isLive = data.publishableKey && data.publishableKey.startsWith('ISPubKey_live_');
-
-        new window.IntaSend({
-          publicAPIKey: data.publishableKey,
-          live: isLive,
         })
-          .on('COMPLETE', () => {
-            window.location.href = `/vouchers?ref=${encodeURIComponent(data.ref)}`;
-          })
-          .on('FAILED', () => {
-            statusEl.classList.add('error');
-            statusEl.textContent = 'Payment did not go through. You can try again.';
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Get voucher';
-          })
-          .on('IN-PROGRESS', () => {
-            submitBtn.textContent = 'Payment in progress...';
-          });
+        .on('IN-PROGRESS', () => {
+          submitBtn.textContent = 'Payment in progress...';
+        });
 
-        trigger.click();
-        return; // IntaSend's checkout popup takes over from here
-      }
+      trigger.click();
+      return; // IntaSend's checkout popup takes over from here
     } catch (err) {
       statusEl.classList.add('error');
       statusEl.textContent = 'Network error, please try again.';
