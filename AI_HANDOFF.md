@@ -342,3 +342,62 @@ then perform the P4 final live verification from section 10 once ready.
 
 **Blockers:** IntaSend sandbox/test key approval still pending.
 
+
+## 18. NEW PHASE — D1 TRANSACTION LEDGER + CHECKOUT TRUST BADGE
+
+The next phase is now underway: add Cloudflare D1 as a SQL transaction ledger while keeping KV as the fast voucher-code store.
+
+### D1 design
+
+- Migration: `migrations/0001_voucher_ledger.sql`
+- Helper: `functions/_lib/ledger.js`
+- Binding name: `DB`
+- Existing KV binding `VOUCHERS` remains in place.
+- D1 is for reporting/audit/state history; KV remains the operational voucher lookup.
+
+The ledger records every purchase attempt at `/api/initiate-payment`, then tracks:
+
+```text
+payment_state
+finalization_state
+voucher_state
+email_state
+voucher_code
+failure_reason
+email_warning
+created_at / updated_at / completed_at
+```
+
+An `email_events` table is included for future detailed delivery history.
+
+### Important deployment step
+
+`wrangler.toml` contains a commented D1 binding template because the actual Cloudflare D1 database ID must be created in the user's Cloudflare account and cannot be invented in source control.
+
+Create a D1 database named something like `ricaspa-ledger`, run the migration, then bind it as:
+
+```text
+DB
+```
+
+and replace the placeholder database ID in `wrangler.toml` / deployment configuration.
+
+Until `DB` is actually bound, the new ledger helpers no-op and the existing KV payment flow remains usable.
+
+### D1 idempotency improvement
+
+Once `DB` is bound, `payment-webhook.js` atomically claims a successful payment through the D1 `orders.finalization_state` row before voucher finalization. This is stronger than relying only on KV's get/delete sequence and is intended to prevent concurrent duplicate COMPLETE webhooks from issuing multiple vouchers.
+
+### Checkout trust badge
+
+`vouchers.html` now includes the supplied IntaSend security/trust badge immediately below the real payment button, linking to IntaSend's security page. The badge is responsive and opens the security page in a new tab with `noopener noreferrer`.
+
+### Current next exact action
+
+1. Create the D1 database in Cloudflare.
+2. Apply `migrations/0001_voucher_ledger.sql`.
+3. Bind it as `DB`.
+4. Deploy and verify D1 writes with a non-payment order initiation if desired, or inspect the first controlled real transaction later.
+5. Build the owner dashboard against D1 (sales totals, date range, voucher status, redemption and revenue reporting).
+
+Do not make a live payment solely to test the D1 schema. The first ledger row can be verified from the `/api/initiate-payment` path once the binding is active.

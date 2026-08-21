@@ -18,6 +18,7 @@
 //      inbound direction isn't blocked, only our outbound calls to them are
 
 import { resolveVoucherOrder, generateRef, json } from "../_lib/voucherCore.js";
+import { recordOrderAttempt } from "../_lib/ledger.js";
 
 // Basic abuse deterrent: max 8 order attempts per IP per 10 minutes. This
 // isn't perfectly precise under concurrent requests (KV is eventually
@@ -62,6 +63,15 @@ export async function onRequestPost(context) {
     );
   } catch (err) {
     return json({ error: "Could not start order", detail: String(err) }, 500);
+  }
+
+  try {
+    await recordOrderAttempt(env, ref, order);
+  } catch (err) {
+    // If D1 is configured, do not allow a payment attempt to proceed without
+    // a ledger row. If D1 is not configured yet, recordOrderAttempt is a no-op.
+    await env.VOUCHERS.delete(`pending:${ref}`);
+    return json({ error: "Could not record order", detail: String(err) }, 500);
   }
 
   const description =

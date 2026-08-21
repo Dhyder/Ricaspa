@@ -173,3 +173,35 @@
     flex-direction: column;
   }
 }
+
+
+/* IntaSend payment trust badge */
+.vouchers .intasend-trust-badge {
+  display: block;
+  text-align: center;
+  margin: 18px auto 0;
+  max-width: 375px;
+}
+
+.vouchers .intasend-trust-badge img {
+  display: block;
+  width: 100%;
+  max-width: 375px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.vouchers .intasend-trust-badge strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 0.8em;
+}
+
+.vouchers .intasend-trust-badge a {
+  color: var(--default-color);
+  text-decoration: none;
+}
+
+.vouchers .intasend-trust-badge strong a {
+  color: #fafafa;
+}

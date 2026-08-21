@@ -23,6 +23,7 @@
 //   failed:REF    — payment failed/canceled, or finalization errored
 
 import { finalizeVoucher } from "../_lib/voucherCore.js";
+import { claimPaymentForFinalization, markPaymentFailed, markFinalizationSuccess, markFinalizationFailed } from "../_lib/ledger.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -50,6 +51,7 @@ export async function onRequestPost(context) {
     // Record the failure so order-status can tell the customer honestly,
     // instead of leaving them polling "pending" until it expires.
     await env.VOUCHERS.delete(`pending:${ref}`);
+    await markPaymentFailed(env, ref, state);
     await env.VOUCHERS.put(`failed:${ref}`, JSON.stringify({ reason: state }), {
       expirationTtl: 60 * 60 * 24, // keep failure record for a day
     });
@@ -61,13 +63,19 @@ export async function onRequestPost(context) {
     return new Response("OK", { status: 200 });
   }
 
-  // Claim the pending record immediately, before doing any work. If
-  // IntaSend sends a duplicate COMPLETE webhook for the same ref (which it
-  // can legitimately do), the second call finds nothing here and safely
-  // no-ops instead of creating a second voucher.
+  // If D1 is configured, it is the atomic claim for finalization. This
+  // closes the race where two COMPLETE webhooks arrive together and both
+  // read the same KV pending record before either deletes it.
+  const d1Claim = await claimPaymentForFinalization(env, ref);
+  if (d1Claim === false) {
+    return new Response("OK", { status: 200 });
+  }
+
+  // KV remains the source of the actual order payload and voucher lookup.
+  // Claim it before finalization when D1 is not configured, preserving the
+  // existing safe behavior until the ledger binding is enabled.
   const pendingRaw = await env.VOUCHERS.get(`pending:${ref}`);
   if (!pendingRaw) {
-    // Either already finalized, already failed, or expired.
     return new Response("OK", { status: 200 });
   }
   await env.VOUCHERS.delete(`pending:${ref}`);
@@ -79,17 +87,16 @@ export async function onRequestPost(context) {
     await env.VOUCHERS.put(
       `completed:${ref}`,
       JSON.stringify({ code, emailWarning: emailWarning || null }),
-      { expirationTtl: 60 * 60 * 24 * 7 } // keep completion record for a week
+      { expirationTtl: 60 * 60 * 24 * 7 }
     );
 
+    await markFinalizationSuccess(env, ref, code, emailWarning);
     return new Response("OK", { status: 200 });
   } catch (err) {
-    // We already claimed (deleted) the pending record, so preserve the
-    // order details here rather than losing them — this can be manually
-    // reprocessed later.
     await env.VOUCHERS.put(`failed:${ref}`, pendingRaw, {
       expirationTtl: 60 * 60 * 24 * 7,
     });
+    await markFinalizationFailed(env, ref, err);
     return new Response("Error: " + String(err), { status: 500 });
   }
 }
