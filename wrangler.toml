@@ -1,14 +1,15 @@
 name = "ricaspa"
+
 compatibility_date = "2026-08-01"
+
 pages_build_output_dir = "."
 
 [[kv_namespaces]]
 binding = "VOUCHERS"
 id = "20e21678c21f48718b235646ff753777"
-# D1 transaction ledger
-# Create the database first, then replace YOUR_D1_DATABASE_ID and uncomment:
+
 [[d1_databases]]
-binding = "ricaspa_ledger"
+binding = "DB"
 database_name = "ricaspa-ledger"
 database_id = "cdf2839a-2f0f-4705-a327-563da5d2cb31"
 migrations_dir = "migrations"

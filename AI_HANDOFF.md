@@ -495,3 +495,97 @@ Known verification state before this change:
 
 NEXT ACTION:
 Deploy this version, run the existing test curl with `testMode:true`, then query the returned `ref` in D1. Verify the real email arrives. Do not make a live IntaSend payment yet.
+
+## 2026-08-23 — reconciliation: two sessions had diverged, now merged
+
+**Context:** this chat session and whatever produced the 2026-08-22 entry
+above (real `wrangler.toml` with live D1/KV IDs, hardened `create-voucher.js`
+test path) had been working on the repo independently, without visibility
+into each other. This entry documents the merge so the next session has one
+coherent picture instead of two half-histories.
+
+**What this chat session had built that wasn't in the other branch:**
+- Signed QR codes on vouchers (`signVoucherCode`/`verifyVoucherSignature` in
+  `voucherCore.js`, `VOUCHER_SIGNING_SECRET` env var, verified in
+  `redeem-voucher.js`)
+- A camera QR scanner on `staff-vouchers.html` (vendored `jsQR`,
+  Apache-2.0, in `assets/vendor/jsqr/`)
+- `test/webhook-lifecycle.test.mjs` — mock/local lifecycle test against a
+  real-schema in-memory D1 (Node's `node:sqlite`), mocked KV, mocked Resend
+
+**What the other branch had built that this session didn't:**
+- The real `wrangler.toml` (live D1 database ID, live KV namespace ID) —
+  adopted as-is, this is the actual provisioned infra
+- `ledger.js`'s `recordOrderAttempt()` gained a `paymentProvider` argument
+  (`'intasend'` for real purchases, `'test'` for synthetic ones) — adopted
+- `create-voucher.js`'s hardened synthetic test path (mirrors the full
+  order → D1 → finalization lifecycle instead of shortcutting it) — adopted
+
+**A conflict that had to be resolved by asking the site owner, not guessing:**
+Both the booking form and the contact form had been separately wired to
+**Web3Forms** (a third-party form API) via `assets/js/forms-handler.js`,
+with hardcoded public access keys in client-side JS. It worked by cloning
+each form node to strip out `validate.js`'s own submit listener before
+attaching its own — meaning `assets/vendor/php-email-form/validate.js` was
+still loaded on every page load but silently doing nothing for those two
+forms. This happened in the other branch while this session was mid-way
+through building a Cloudflare Function + Resend approach for the same
+forms, per an earlier instruction in this chat.
+
+**Resolution (explicit owner decision):** switch fully to Cloudflare
+Functions + Resend + D1 for both forms, matching every other piece of this
+app. Web3Forms removed entirely.
+
+**What changed as a result:**
+- `functions/api/book-session.js` (new) — backs the booking form.
+  `functions/_lib/bookingLedger.js` (new) + `migrations/0002_bookings.sql`
+  (new) — durable record of every booking request, D1-optional (degrades
+  to email-only if `DB` isn't bound, same pattern as `ledger.js`).
+- `functions/api/contact-message.js` (new) — backs the contact form.
+  `functions/_lib/contactLedger.js` (new) +
+  `migrations/0003_contact_messages.sql` (new) — same pattern.
+- `assets/js/forms-handler.js` deleted (was the Web3Forms integration).
+  Its genuinely useful part — business-hours/date validation on the
+  booking form — survives as `assets/js/booking-datetime.js`, rewritten to
+  *only* set `<input>` constraints and never touch form submission, so it
+  can't shadow `validate.js` the way the old file did.
+- `assets/js/advanced-features.js` and `assets/js/alternative-implementations.js`
+  deleted — dead exploration files, never actually `<script>`-included
+  anywhere, confirmed before deleting.
+- `index.html` — booking form: `action="#"` → `action="/api/book-session"`,
+  the restaurant-template "Number of People" dropdown replaced with a
+  "Preferred Service" dropdown (mirrors the `SERVICES` list used on the
+  voucher page — keep both in sync if services change), `alt="Restaurant
+  interior"` fixed (the image itself was already correctly Rica-branded).
+  Contact form: `action="forms/contact.php"` → `action="/api/contact-message"`.
+- `forms/book-a-table.php` and `forms/contact.php` are now fully dead —
+  nothing references them anymore. Left in place rather than deleted
+  (harmless, Cloudflare Pages never executed them anyway) but safe to
+  remove in a later cleanup pass.
+- `test/mocks/d1.mjs` now runs every migration file in `migrations/`
+  (was hardcoded to just 0001) so the mock schema stays correct as new
+  tables get added.
+- `test/booking-contact.test.mjs` (new) — 22 checks covering both new
+  endpoints: happy path, missing fields, bad email, Resend outage
+  (confirms the failure is recorded in D1, not silently dropped), rate
+  limiting, and graceful degradation with no D1 binding.
+
+**Test status:** `test/webhook-lifecycle.test.mjs` (51 checks) and
+`test/booking-contact.test.mjs` (22 checks) — 73/73 passing against the
+merged tree.
+
+**New env vars needed** (add to the Cloudflare dashboard checklist in
+`INTASEND_SETUP.md` §0): `BOOKING_NOTIFY_EMAIL`, `CONTACT_NOTIFY_EMAIL`.
+
+**NEXT ACTION:** deploy the merged tree, confirm all env vars from
+`INTASEND_SETUP.md` §0 are actually set (not just referenced in code —
+`STAFF_SECRET` taught us not to assume), then run through both test
+suites' scenarios manually once against the real deployment: submit the
+booking form, submit the contact form, confirm both emails arrive, confirm
+D1 rows appear. Only after that, proceed to the deferred KES 500+ live
+IntaSend verification from section 18/10.
+
+**If another session works on this repo in parallel again:** please add an
+entry here (dated) describing what changed, the way this entry and the
+2026-08-22 one did — that's the only reason this reconciliation was
+possible without guessing at intent.

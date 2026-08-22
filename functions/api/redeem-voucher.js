@@ -14,7 +14,7 @@
 // Requires (Cloudflare Pages > Settings > Environment variables):
 //   STAFF_SECRET — any string you choose, share only with staff who need it
 
-import { json } from "../_lib/voucherCore.js";
+import { json, verifyVoucherSignature } from "../_lib/voucherCore.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -33,8 +33,20 @@ export async function onRequestPost(context) {
 
   const code = (body.code || "").trim().toUpperCase();
   const action = body.action === "redeem" ? "redeem" : "lookup";
+  const signature = body.signature ? String(body.signature).trim() : null;
 
   if (!code) return json({ error: "Missing code" }, 400);
+
+  // Only checked when a signature was actually supplied (i.e. the code came
+  // from scanning a QR, not typed in by hand). `null` from
+  // verifyVoucherSignature means signing isn't configured on this
+  // deployment — degrade to code-only lookup rather than blocking staff.
+  if (signature) {
+    const valid = await verifyVoucherSignature(env, code, signature);
+    if (valid === false) {
+      return json({ error: "QR signature invalid — this code may have been altered or fabricated" }, 400);
+    }
+  }
 
   const raw = await env.VOUCHERS.get(code);
   if (!raw) {

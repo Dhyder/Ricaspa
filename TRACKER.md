@@ -2,6 +2,20 @@
 
 ## 🔴 Critical — verify before any real launch
 
+- [ ] **Confirm every required env var is actually set in Cloudflare.**
+      `STAFF_SECRET` was referenced in code for two sessions without ever
+      being set — don't assume the others are set just because the code
+      references them. Full checklist in `INTASEND_SETUP.md` §0:
+      `INTASEND_PUBLISHABLE_KEY`, `INTASEND_SECRET_KEY`,
+      `INTASEND_WEBHOOK_CHALLENGE`, `RESEND_API_KEY`, `STAFF_SECRET`,
+      `TEST_MODE_SECRET`, `VOUCHER_SIGNING_SECRET`, `BOOKING_NOTIFY_EMAIL`
+      (new), `CONTACT_NOTIFY_EMAIL` (new) — plus the `DB` and `VOUCHERS`
+      bindings.
+- [ ] **Verify the booking and contact forms against the real deployment,
+      not just the mock test suite.** `test/booking-contact.test.mjs`
+      passes locally (22/22), but that only proves the code logic — submit
+      both forms for real once deployed and confirm the emails actually
+      land and D1 rows appear.
 - [ ] **End-to-end payment confirmation still not fully verified.** A real
       M-Pesa STK push was confirmed reaching IntaSend with the correct
       amount — but the full chain past that point hasn't been proven yet:
@@ -9,7 +23,7 @@
   - [ ] Does the webhook actually get called by IntaSend, verify the
         challenge, and finalize (check: does `completed:REF` appear in KV
         with a code)?
-  - [ ] Does the buyer actually receive the voucher email?
+  - [ ] Does the buyer actually receive the voucher email, QR included?
   - [ ] For a gift purchase with a recipient email filled in: does the
         recipient get the voucher, AND does the buyer get the separate
         confirmation email?
@@ -34,17 +48,35 @@
       as success
 - [x] **Voucher codes now use `crypto.getRandomValues()`** instead of
       `Math.random()`
-- [x] **Basic rate limiting** on `/api/initiate-payment` (8 attempts per IP
-      per 10 min via KV). Not perfectly precise (KV isn't transactional),
-      but stops casual spam. Cloudflare's dashboard-level Rate Limiting
-      Rules can layer on top for stronger protection later.
+- [x] **Basic rate limiting** on `/api/initiate-payment`, `/api/book-session`,
+      and `/api/contact-message` (8 attempts per IP per 10 min via KV, each
+      under its own key prefix). Not perfectly precise (KV isn't
+      transactional), but stops casual spam. Cloudflare's dashboard-level
+      Rate Limiting Rules can layer on top for stronger protection later.
 - [x] **Redemption/lookup tool built** — `/staff-vouchers.html`, a simple
       passphrase-gated page for reception to look up or redeem a code
       without touching the Cloudflare dashboard. Needs `STAFF_SECRET` env var.
+- [x] **D1 transaction ledger** — every order attempt, finalization
+      state, and email send is recorded in D1 (`orders`, `email_events`),
+      not just KV. Real database provisioned (see `wrangler.toml`).
+- [x] **Signed QR codes on vouchers** — QR encodes `code.signature`
+      (HMAC-SHA256, `VOUCHER_SIGNING_SECRET`), verified at
+      `/api/redeem-voucher` when scanned. Prevents a fabricated/edited QR
+      from being accepted; doesn't rotate over time (that's the deferred
+      "live rotating page" idea below).
+- [x] **Camera QR scanner on `/staff-vouchers.html`** — vendored `jsQR`
+      (Apache-2.0, no CDN dependency), decodes `code.signature`, shows a
+      "✓ verified" badge on a signature match.
+- [x] **Booking + contact forms moved off Web3Forms onto Cloudflare
+      Functions** (`/api/book-session`, `/api/contact-message`) — Resend +
+      D1, same pattern as the rest of the app, no third-party dependency or
+      hardcoded public access keys in client JS.
 - [ ] Error responses still sometimes echo raw internal error strings —
       fine while debugging, worth trimming before real customers can
       trigger and see them
 - [ ] Leftover Pesapal env vars still in Cloudflare, unused but uncleaned
+- [ ] `forms/book-a-table.php` and `forms/contact.php` are now fully dead
+      (nothing references them) — safe to delete in a cleanup pass
 
 ## 🟡 Known gaps / decisions pending
 
@@ -53,17 +85,27 @@
       before promising "M-Pesa + card" anywhere in marketing
 - [ ] **Discount voucher type** — UI exists (disabled, "Soon"), mechanics
       never decided
-- [ ] Dead PHP contact/booking forms still referenced on the main site —
-      Cloudflare Pages doesn't run PHP, these silently do nothing
-- [ ] No dashboard/list view of all vouchers sold — only individually
-      look-up-able by code
+- [ ] **Live rotating QR page** — deferred follow-up to the static signed
+      QR. Spec'd in `AI_HANDOFF.md` (search "rotating QR"): a "My Voucher"
+      page the email links to, polling a short-lived token endpoint every
+      ~30s so the QR can't just be screenshotted and reused. Not started.
+- [ ] No dashboard/list view of all vouchers sold, bookings, or contact
+      messages — everything's in D1 now, but only queryable directly, no UI
 
 ## ✅ Done
 
 - [x] Voucher purchase form (cash amount / specific service / self-gift / gift-someone-else)
 - [x] Real service catalog + server-side price validation
-- [x] Voucher email + separate buyer confirmation email for gifts
+- [x] Voucher email + separate buyer confirmation email for gifts, with QR code
 - [x] Moved off Pesapal (not licensed in Kenya) to IntaSend (CBK-licensed)
 - [x] Worked around IntaSend's Cloudflare Workers IP block via client-side SDK checkout
 - [x] Clean `/vouchers` URL, page unlinked from nav + noindex while in progress
 - [x] Full security/reliability hardening pass (see above)
+- [x] D1 transaction ledger + real database provisioned
+- [x] Signed QR codes + staff camera scanner
+- [x] Booking section retailored (real backend, service dropdown instead of
+      restaurant "Number of People", fixed alt text) and tracked as its own
+      line item through to completion
+- [x] Contact form also moved to a real backend in the same pass (Web3Forms removed)
+- [x] Mock/local test coverage for the full webhook lifecycle (51 checks)
+      and the booking/contact backends (22 checks) — 73/73 passing

@@ -758,7 +758,7 @@
 
           <div class="col-lg-6" data-aos="fade-left" data-aos-delay="300">
             <div class="reservation-image">
-              <img src="assets/img/restaurant/booking2.png" alt="Restaurant interior" class="img-fluid rounded">
+              <img src="assets/img/restaurant/booking2.png" alt="Rica Spa reception and booking desk" class="img-fluid rounded">
             </div>
           </div>
         </div>
@@ -771,7 +771,7 @@
                 <p>Please fill the form below to make a reservation</p>
               </div>
 
-              <form action="#" method="post" role="form" class="php-email-form mt-4">
+              <form action="/api/book-session" method="post" role="form" class="php-email-form mt-4">
                 <div class="row gy-4">
                   <div class="col-lg-4 form-group">
                     <input type="text" name="name" class="form-control" placeholder="Your Name" required="">
@@ -783,14 +783,22 @@
                     <input type="text" class="form-control" name="phone" placeholder="Your Phone" required="">
                   </div>
                   <div class="col-lg-4 form-group">
-                    <select name="people" class="form-select" required="">
-                      <option value="">Number of People</option>
-                      <option value="1">1 Person</option>
-                      <option value="2">2 People</option>
-                      <option value="3">3 People</option>
-                      <option value="4">4 People</option>
-                      <option value="5">5 People</option>
-                      <option value="6">6+ People</option>
+                    <select name="service" class="form-select">
+                      <option value="">Preferred Service (optional)</option>
+                      <option value="Swedish Massage (1 Hour)">Swedish Massage (1 Hour)</option>
+                      <option value="Deep Tissue Massage (1 Hour)">Deep Tissue Massage (1 Hour)</option>
+                      <option value="Sports &amp; Thai Massage">Sports &amp; Thai Massage</option>
+                      <option value="Foam Massage (1 Hour)">Foam Massage (1 Hour)</option>
+                      <option value="Aromatherapy Massage">Aromatherapy Massage</option>
+                      <option value="Hot Stone Massage (90 Minutes)">Hot Stone Massage (90 Minutes)</option>
+                      <option value="Prenatal Massage">Prenatal Massage</option>
+                      <option value="Four Hands Massage">Four Hands Massage</option>
+                      <option value="Back Massage (30 Minutes)">Back Massage (30 Minutes)</option>
+                      <option value="Foot Massage (20 Minutes)">Foot Massage (20 Minutes)</option>
+                      <option value="Head Massage (20 Minutes)">Head Massage (20 Minutes)</option>
+                      <option value="Steam Bath">Steam Bath</option>
+                      <option value="Moroccan Bath Ritual">Moroccan Bath Ritual</option>
+                      <option value="Not sure yet">Not sure yet — advise me</option>
                     </select>
                   </div>
                   <div class="col-lg-4 form-group">
@@ -1028,7 +1036,7 @@
             <div class="contact-form-wrapper">
               <h2 class="text-center mb-4">Get in Touch</h2>
 
-              <form action="forms/contact.php" method="post" class="php-email-form">
+              <form action="/api/contact-message" method="post" class="php-email-form">
                 <div class="row g-3">
                   <div class="col-md-6">
                     <div class="form-group">
@@ -1168,7 +1176,7 @@
 
   <!-- Main JS File -->
   <script src="assets/js/main.js"></script>
-  <script src="assets/js/forms-handler.js"></script>
+  <script src="assets/js/booking-datetime.js"></script>
 
 </body>
 

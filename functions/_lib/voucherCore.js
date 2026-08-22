@@ -38,6 +38,60 @@ export function generateRef() {
   return "RS" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
+// --- QR signing ---------------------------------------------------------
+//
+// The QR embeds `CODE.SIGNATURE` instead of the bare code. SIGNATURE is an
+// HMAC-SHA256 over the code, truncated to 10 hex chars, keyed by
+// env.VOUCHER_SIGNING_SECRET. This doesn't make the QR rotate over time —
+// it's a static image in an already-sent email — but it does mean nobody
+// can hand-craft or edit a QR payload without the server secret: the staff
+// scanner independently recomputes the signature and rejects a mismatch
+// before ever touching KV, so a doctored/fabricated QR fails even if its
+// "code" portion happens to collide with something real.
+//
+// Requires (Cloudflare Pages > Settings > Environment variables):
+//   VOUCHER_SIGNING_SECRET — any long random string, separate from other keys
+//
+// If the secret isn't set, signing/verification is skipped entirely (QR
+// falls back to the bare code) rather than breaking voucher issuance —
+// same "degrade, don't block" pattern as the D1 ledger.
+let cachedSigningKey = null;
+let cachedSigningKeySecret = null;
+
+async function getSigningKey(env) {
+  const secret = env.VOUCHER_SIGNING_SECRET;
+  if (!secret) return null;
+  if (cachedSigningKey && cachedSigningKeySecret === secret) return cachedSigningKey;
+  cachedSigningKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  cachedSigningKeySecret = secret;
+  return cachedSigningKey;
+}
+
+export async function signVoucherCode(env, code) {
+  const key = await getSigningKey(env);
+  if (!key) return null;
+  const sigBytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(code));
+  const hex = [...new Uint8Array(sigBytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 10);
+}
+
+// Returns true/false, or null if signing isn't configured (caller decides
+// how to treat "not configured" — the staff endpoint treats it as "skip
+// the check, fall back to code-only lookup" so unsigned legacy vouchers
+// and deployments without the secret set still work).
+export async function verifyVoucherSignature(env, code, signature) {
+  if (!env.VOUCHER_SIGNING_SECRET) return null;
+  const expected = await signVoucherCode(env, code);
+  if (!expected) return null;
+  return expected === String(signature || "").toLowerCase();
+}
+
 // Validates + resolves a submitted voucher payload into a clean order shape.
 // Returns { error } or { order }.
 export function resolveVoucherOrder(body) {
@@ -136,6 +190,13 @@ export async function finalizeVoucher(env, order, ref = null) {
     day: "numeric", month: "long", year: "numeric",
   });
 
+  // Sign once and reuse the same payload for every email tied to this
+  // voucher (including a finalization retry) — recomputing is cheap and
+  // deterministic (same code + same secret = same signature), so a retry
+  // naturally produces an identical QR rather than a second one.
+  const signature = await signVoucherCode(env, code);
+  const qrPayload = signature ? `${code}.${signature}` : code;
+
   const html = buildVoucherEmail({
     type: record.type,
     value: record.value,
@@ -144,6 +205,7 @@ export async function finalizeVoucher(env, order, ref = null) {
     fromName: record.fromName,
     message: record.message,
     code,
+    qrPayload,
     expiresDisplay,
   });
 
@@ -234,6 +296,19 @@ export async function finalizeVoucher(env, order, ref = null) {
   return { code, record, emailWarning };
 }
 
+// QR image for the voucher code, rendered server-side via a hosted QR
+// generator (no bundler/canvas dependency needed in the Workers runtime).
+// `payload` is `code` or `code.signature` (see signVoucherCode above) —
+// nothing else is encoded, so the QR carries no more information than the
+// text already printed next to it, and it does not perform redemption by
+// itself. Reception scans it at /staff-vouchers.html (passphrase-gated),
+// which fills the lookup field with the decoded value; redemption still
+// requires the explicit staff action, unchanged from before.
+export function qrCodeImageUrl(payload, size = 220) {
+  const data = encodeURIComponent(payload);
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=10&data=${data}`;
+}
+
 function labelFor(type) {
   if (type === "amount") return "Voucher value";
   return "Included treatment";
@@ -244,7 +319,7 @@ function displayValue(type, value, serviceName) {
   return serviceName || value;
 }
 
-export function buildVoucherEmail({ type, value, serviceName, toName, fromName, message, code, expiresDisplay }) {
+export function buildVoucherEmail({ type, value, serviceName, toName, fromName, message, code, qrPayload, expiresDisplay }) {
   const valueLabel = labelFor(type);
   const valueText = displayValue(type, value, serviceName);
   const subText = type === "service"
@@ -282,6 +357,10 @@ export function buildVoucherEmail({ type, value, serviceName, toName, fromName, 
                     <div style="margin-top:14px;display:inline-block;background:rgba(248,243,230,0.08);border:1px solid rgba(248,243,230,0.2);border-radius:5px;padding:8px 14px;color:#F8F3E6;font-family:monospace;font-size:15px;letter-spacing:1px;">
                       ${code}
                     </div>
+                    <div style="margin-top:16px;">
+                      <img src="${qrCodeImageUrl(qrPayload || code)}" width="160" height="160" alt="QR code for voucher ${code}" style="display:inline-block;background:#F8F3E6;padding:10px;border-radius:8px;">
+                    </div>
+                    <div style="color:rgba(248,243,230,0.45);font-size:10px;margin-top:8px;">Show this code or QR at reception</div>
                     <div style="color:rgba(248,243,230,0.55);font-size:11px;margin-top:10px;">Valid until ${expiresDisplay}</div>
                   </td>
                 </tr>

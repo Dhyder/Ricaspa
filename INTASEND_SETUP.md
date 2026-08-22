@@ -1,5 +1,38 @@
 # IntaSend Payment Integration — Setup
 
+## 0. Environment variables checklist (all of them, not just IntaSend's)
+
+Before any deploy, confirm every one of these is set in **Cloudflare
+dashboard → `ricaspa` project → Settings → Environment variables** (or via
+`npx wrangler pages secret put NAME --project-name=ricaspa`). This list spans
+the whole app, not just IntaSend — it's the single place to check so nothing
+gets missed the way `STAFF_SECRET` did (it sat referenced-in-code but unset
+for two sessions before anyone noticed).
+
+| Variable | What it gates | Where it comes from |
+|---|---|---|
+| `INTASEND_PUBLISHABLE_KEY` | client-side checkout | IntaSend dashboard → API Keys |
+| `INTASEND_SECRET_KEY` | server-side status checks (`intasend.js`) | IntaSend dashboard → API Keys |
+| `INTASEND_WEBHOOK_CHALLENGE` | `/api/payment-webhook` auth | you choose it — see step 3 below, **must match exactly** what's entered in the IntaSend dashboard's webhook config |
+| `RESEND_API_KEY` | voucher, booking, and contact emails | Resend dashboard |
+| `STAFF_SECRET` | `/staff-vouchers.html`, `/api/redeem-voucher` | you choose it — this is reception's login passphrase |
+| `TEST_MODE_SECRET` | `/api/create-voucher` (test-mode minting) | you choose it |
+| `VOUCHER_SIGNING_SECRET` | signed QR codes on vouchers | you choose it |
+| `BOOKING_NOTIFY_EMAIL` | which inbox `/api/book-session` requests land in | your real operational email |
+| `CONTACT_NOTIFY_EMAIL` | which inbox `/api/contact-message` submissions land in | your real operational email |
+
+For the "you choose it" secrets: generate a long random string per
+variable (don't reuse one string across all of them) — e.g.
+`openssl rand -base64 24` locally, or ask whatever AI agent you're working
+with to generate one fresh each time. Treat them like passwords: set them
+directly in the Cloudflare dashboard, never commit them to the repo, and if
+one is ever pasted into a chat/ticket/Slack message, rotate it afterward.
+
+Confirm the D1 binding (`DB`) and KV binding (`VOUCHERS`) from
+`wrangler.toml` are also live in the same Settings page — those aren't env
+vars but are just as easy to forget after a fresh Cloudflare Pages project
+setup.
+
 ## 1. Sign up and get keys
 
 Sign up at https://intasend.com (or log in if you already have an account

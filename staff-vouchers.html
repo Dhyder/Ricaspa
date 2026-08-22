@@ -20,6 +20,11 @@
   .row{display:flex;justify-content:space-between;margin-bottom:4px;}
   .row b{color:#B9924A;}
   #gate{max-width:320px;margin:80px auto;text-align:center;}
+  .btn-scan{background:rgba(185,146,74,0.18);color:#B9924A;border:1px solid rgba(185,146,74,0.4);}
+  #scanBox{display:none;margin-bottom:10px;border-radius:8px;overflow:hidden;position:relative;background:#000;}
+  #scanVideo{width:100%;display:block;}
+  #scanHint{position:absolute;bottom:8px;left:0;right:0;text-align:center;color:#F8F3E6;font-size:11px;background:rgba(0,0,0,0.5);padding:4px 0;}
+  .btn-cancel-scan{background:rgba(224,122,122,0.15);color:#e07a7a;}
 </style>
 </head>
 <body>
@@ -35,15 +40,84 @@
   <h1>Voucher Desk</h1>
   <p class="sub">Look up or redeem a customer's voucher code.</p>
 
-  <input id="codeInput" type="text" placeholder="RICA-XXXX-XXXX" autocapitalize="characters">
+  <input id="codeInput" type="text" placeholder="RICA-XXXX-XXXX" autocapitalize="characters" oninput="scannedSignature=null">
   <button class="btn-lookup" onclick="lookup()">Look up</button>
   <button class="btn-redeem" id="redeemBtn" onclick="redeem()" disabled>Mark as redeemed</button>
+
+  <div id="scanBox">
+    <video id="scanVideo" playsinline muted></video>
+    <div id="scanHint">Point the camera at the voucher's QR code</div>
+  </div>
+  <button class="btn-scan" id="scanBtn" onclick="toggleScan()">📷 Scan QR code</button>
 
   <div id="result"></div>
 </div>
 
+<canvas id="scanCanvas" style="display:none;"></canvas>
+<script src="/assets/vendor/jsqr/jsQR.js"></script>
 <script>
   let staffSecret = '';
+  let scannedSignature = null;
+  let scanStream = null;
+  let scanRAF = null;
+
+  async function toggleScan() {
+    const box = document.getElementById('scanBox');
+    const btn = document.getElementById('scanBtn');
+    if (scanStream) {
+      stopScan();
+      return;
+    }
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch {
+      showResult({ error: 'Camera access denied or unavailable. Type the code instead.' }, true);
+      return;
+    }
+    const video = document.getElementById('scanVideo');
+    video.srcObject = scanStream;
+    await video.play();
+    box.style.display = 'block';
+    btn.textContent = '✕ Cancel scan';
+    btn.className = 'btn-cancel-scan';
+    scanTick();
+  }
+
+  function stopScan() {
+    if (scanRAF) cancelAnimationFrame(scanRAF);
+    scanRAF = null;
+    if (scanStream) {
+      scanStream.getTracks().forEach((t) => t.stop());
+      scanStream = null;
+    }
+    document.getElementById('scanBox').style.display = 'none';
+    const btn = document.getElementById('scanBtn');
+    btn.textContent = '📷 Scan QR code';
+    btn.className = 'btn-scan';
+  }
+
+  function scanTick() {
+    const video = document.getElementById('scanVideo');
+    const canvas = document.getElementById('scanCanvas');
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const result = window.jsQR(imageData.data, imageData.width, imageData.height);
+      if (result && result.data) {
+        const raw = result.data.trim();
+        const [scannedCode, scannedSig] = raw.includes('.') ? raw.split('.') : [raw, null];
+        stopScan();
+        document.getElementById('codeInput').value = scannedCode.toUpperCase();
+        scannedSignature = scannedSig;
+        lookup();
+        return;
+      }
+    }
+    scanRAF = requestAnimationFrame(scanTick);
+  }
 
   function unlock() {
     staffSecret = document.getElementById('secretInput').value;
@@ -66,6 +140,7 @@
     const v = data.voucher;
     const valueText = v.type === 'amount' ? `KES ${Number(v.value).toLocaleString()}` : (v.serviceName || v.value);
     el.innerHTML = `
+      ${scannedSignature ? `<div class="row"><span>QR signature</span><b style="color:#6fbf73;">✓ verified</b></div>` : ''}
       <div class="row"><span>Status</span><b>${v.status.toUpperCase()}</b></div>
       <div class="row"><span>Value</span><b>${valueText}</b></div>
       <div class="row"><span>To</span><span>${v.toName}</span></div>
@@ -82,7 +157,7 @@
       const res = await fetch('/api/redeem-voucher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Staff-Secret': staffSecret },
-        body: JSON.stringify({ code, action }),
+        body: JSON.stringify({ code, action, signature: scannedSignature || undefined }),
       });
       const data = await res.json();
       showResult(data, !res.ok);
