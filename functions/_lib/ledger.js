@@ -1,18 +1,13 @@
 // D1 transaction ledger helpers.
 //
-// D1 is intentionally an audit/reporting ledger alongside KV, not a
-// replacement for the fast voucher-code lookup in VOUCHERS.
-//
-// Until the D1 binding is added in Cloudflare, these helpers safely no-op so
-// the existing KV payment path remains deployable. Once env.DB is bound,
-// every purchase attempt is recorded and payment/finalization states are
-// updated here.
+// D1 is the durable transaction/audit ledger. KV remains the fast operational
+// store for voucher-code lookup and the pending/completed browser flow.
 
 function db(env) {
   return env.DB || null;
 }
 
-export async function recordOrderAttempt(env, ref, order) {
+export async function recordOrderAttempt(env, ref, order, paymentProvider = 'intasend') {
   const database = db(env);
   if (!database) return;
 
@@ -23,7 +18,7 @@ export async function recordOrderAttempt(env, ref, order) {
       gifting_others, to_name, recipient_email, from_name, message,
       payment_provider, payment_state, finalization_state, voucher_state,
       email_state, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'intasend', 'pending', 'pending', 'pending', 'pending', ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', 'pending', 'pending', ?, ?)
   `).bind(
     ref,
     order.type,
@@ -37,6 +32,7 @@ export async function recordOrderAttempt(env, ref, order) {
     order.recipientEmail || null,
     order.fromName || null,
     order.message || null,
+    paymentProvider,
     now,
     now,
   ).run();
@@ -56,7 +52,9 @@ export async function markPaymentFailed(env, ref, reason) {
 }
 
 // Atomically claims a successful payment for finalization. Only the first
-// COMPLETE webhook for a pending row gets changes > 0.
+// COMPLETE webhook for a pending row gets changes > 0. If finalization later
+// fails, markFinalizationFailed() returns the row to pending so an IntaSend
+// retry can safely resume without issuing a second voucher.
 export async function claimPaymentForFinalization(env, ref) {
   const database = db(env);
   if (!database) return null;
@@ -65,7 +63,7 @@ export async function claimPaymentForFinalization(env, ref) {
   const result = await database.prepare(`
     UPDATE orders
     SET payment_state = 'completed', finalization_state = 'processing',
-        payment_completed_at = ?, updated_at = ?
+        payment_completed_at = COALESCE(payment_completed_at, ?), updated_at = ?
     WHERE ref = ? AND finalization_state = 'pending'
   `).bind(now, now, ref).run();
 
@@ -99,16 +97,19 @@ export async function markFinalizationFailed(env, ref, reason) {
   if (!database) return;
 
   const now = new Date().toISOString();
+  // Keep payment_state=completed: the customer did pay. Return only the
+  // finalization claim to pending so a webhook retry can resume safely.
   await database.prepare(`
     UPDATE orders
-    SET finalization_state = 'failed', voucher_state = 'failed',
-        email_state = 'failed', failure_reason = ?, updated_at = ?
+    SET finalization_state = 'pending',
+        failure_reason = ?, updated_at = ?
     WHERE ref = ?
   `).bind(String(reason || 'Finalization failed'), now, ref).run();
 }
 
 export async function recordEmailEvent(env, ref, emailType, recipient, status, providerId, error) {
   const database = db(env);
+  if (!ref) return;
   if (!database) return;
 
   await database.prepare(`
@@ -124,4 +125,10 @@ export async function recordEmailEvent(env, ref, emailType, recipient, status, p
     error || null,
     new Date().toISOString(),
   ).run();
+}
+
+export async function getOrder(env, ref) {
+  const database = db(env);
+  if (!database) return null;
+  return database.prepare(`SELECT * FROM orders WHERE ref = ?`).bind(ref).first();
 }

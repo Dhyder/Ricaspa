@@ -1,27 +1,24 @@
 // POST /api/create-voucher
 //
-// TEST MODE ONLY — bypasses real payment entirely. Used while developing/
-// testing the voucher + email flow. Real purchases go through
-// /api/initiate-payment -> IntaSend checkout -> /api/payment-webhook instead.
+// TEST MODE ONLY — bypasses real payment entirely. This endpoint deliberately
+// creates a synthetic *completed* order so the production voucher, KV, Resend,
+// and D1 ledger paths can be exercised without spending money.
 //
-// SECURITY: this endpoint mints real vouchers with no payment involved, so
-// it requires a shared secret header. Without this, anyone who finds this
-// URL could generate free vouchers indefinitely. There is deliberately no
-// UI for this on the public site — trigger it yourself via curl.
-//
-// Example:
-//   curl -s -X POST https://ricaspa.beauty/api/create-voucher \
-//     -H "Content-Type: application/json" \
-//     -H "X-Test-Secret: YOUR_SECRET" \
-//     -d '{"type":"amount","value":"2000","buyerName":"Test","buyerEmail":"you@email.com","giftingOthers":false,"testMode":true}'
-//
-// Requires (Cloudflare Pages > Settings > Environment variables):
-//   RESEND_API_KEY
-//   TEST_MODE_SECRET   — any string you choose, keep it private
-// Requires (Pages > Settings > Functions > KV bindings):
-//   VOUCHERS
+// SECURITY: this endpoint mints real vouchers with no payment involved, so it
+// requires a shared secret header. There is deliberately no public UI for it.
 
-import { resolveVoucherOrder, finalizeVoucher, json } from "../_lib/voucherCore.js";
+import {
+  resolveVoucherOrder,
+  finalizeVoucher,
+  generateRef,
+  json,
+} from "../_lib/voucherCore.js";
+import {
+  recordOrderAttempt,
+  claimPaymentForFinalization,
+  markFinalizationSuccess,
+  markFinalizationFailed,
+} from "../_lib/ledger.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -48,10 +45,56 @@ export async function onRequestPost(context) {
   const { error, order } = resolveVoucherOrder(body);
   if (error) return json({ error }, 400);
 
+  const ref = generateRef();
+
   try {
-    const { code } = await finalizeVoucher(env, order);
-    return json({ success: true, code });
+    // Mirror the real payment path: create the pending order in KV and the
+    // transaction row in D1 before finalization begins.
+    await env.VOUCHERS.put(
+      `pending:${ref}`,
+      JSON.stringify({ order }),
+      { expirationTtl: 60 * 60 * 2 }
+    );
+
+    await recordOrderAttempt(env, ref, order, "test");
+
+    // Mark the synthetic payment as completed and claim finalization exactly
+    // as the real IntaSend COMPLETE webhook does.
+    const claim = await claimPaymentForFinalization(env, ref);
+    if (claim === false) {
+      throw new Error("Could not claim synthetic test payment");
+    }
+
+    const { code, emailWarning } = await finalizeVoucher(env, order, ref);
+
+    await env.VOUCHERS.put(
+      `completed:${ref}`,
+      JSON.stringify({ code, emailWarning: emailWarning || null }),
+      { expirationTtl: 60 * 60 * 24 * 30 }
+    );
+
+    await markFinalizationSuccess(env, ref, code, emailWarning);
+    await env.VOUCHERS.delete(`pending:${ref}`);
+    await env.VOUCHERS.delete(`failed:${ref}`);
+
+    return json({
+      success: true,
+      test: true,
+      ref,
+      code,
+      emailWarning: emailWarning || null,
+    });
   } catch (err) {
-    return json({ error: String(err.message || err) }, 500);
+    await markFinalizationFailed(env, ref, err);
+    await env.VOUCHERS.put(
+      `failed:${ref}`,
+      JSON.stringify({ reason: String(err), retryable: true }),
+      { expirationTtl: 60 * 60 * 24 * 7 }
+    );
+
+    return json({
+      error: String(err.message || err),
+      ref,
+    }, 500);
   }
 }

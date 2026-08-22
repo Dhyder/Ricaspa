@@ -1,12 +1,9 @@
 // GET /api/order-status?ref=REF
 //
-// Lets the frontend check whether a pending order has been finalized yet.
-// Reads explicit state markers written by /api/payment-webhook:
-//   completed:REF — payment confirmed, voucher created (returns the code)
-//   failed:REF    — payment failed/canceled, or finalization errored
-//   pending:REF   — still waiting
-//   (none found)  — expired or never existed
+// D1 is authoritative when available. KV remains the fast fallback and stores
+// the voucher record/code used by the browser flow.
 
+import { getOrder } from "../_lib/ledger.js";
 import { json } from "../_lib/voucherCore.js";
 
 export async function onRequestGet(context) {
@@ -16,6 +13,29 @@ export async function onRequestGet(context) {
 
   if (!ref) return json({ error: "Missing ref" }, 400);
 
+  const order = await getOrder(env, ref);
+  if (order) {
+    if (order.finalization_state === "completed") {
+      return json({
+        status: "completed",
+        code: order.voucher_code || undefined,
+        emailWarning: order.email_warning || null,
+        emailState: order.email_state || null,
+      });
+    }
+
+    if (order.payment_state === "failed" || order.finalization_state === "failed") {
+      return json({ status: "failed" });
+    }
+
+    if (order.payment_state === "completed" && order.finalization_state === "pending") {
+      return json({ status: "pending", paymentConfirmed: true });
+    }
+
+    return json({ status: "pending" });
+  }
+
+  // Legacy/fallback path if DB is unavailable or an older order predates D1.
   const completedRaw = await env.VOUCHERS.get(`completed:${ref}`);
   if (completedRaw) {
     const { code, emailWarning } = JSON.parse(completedRaw);
@@ -23,16 +43,10 @@ export async function onRequestGet(context) {
   }
 
   const failedRaw = await env.VOUCHERS.get(`failed:${ref}`);
-  if (failedRaw) {
-    return json({ status: "failed" });
-  }
+  if (failedRaw) return json({ status: "failed" });
 
   const pendingRaw = await env.VOUCHERS.get(`pending:${ref}`);
-  if (pendingRaw) {
-    return json({ status: "pending" });
-  }
+  if (pendingRaw) return json({ status: "pending" });
 
-  // No record under any state — either it expired (2hr TTL on pending) or
-  // the ref was never valid to begin with.
   return json({ status: "unknown" });
 }

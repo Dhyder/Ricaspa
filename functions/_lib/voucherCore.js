@@ -1,3 +1,5 @@
+import { recordEmailEvent } from "./ledger.js";
+
 // Shared voucher logic: service catalog, code generation, email templates,
 // and the "finalize" step (save to KV + send emails) used by both the
 // test-mode endpoint and the real IntaSend payment flow.
@@ -89,24 +91,50 @@ export function resolveVoucherOrder(body) {
 }
 
 // Generates the code, stores the voucher in KV, and emails it out.
-// `order` is the shape returned by resolveVoucherOrder().
-export async function finalizeVoucher(env, order) {
-  const code = generateCode();
-  const expires = new Date();
-  expires.setMonth(expires.getMonth() + 6);
-  const expiresDisplay = expires.toLocaleDateString("en-GB", {
+// `order` is the shape returned by resolveVoucherOrder(). `ref` is optional
+// for test-mode callers; real payment finalization passes the IntaSend ref so
+// retries can reuse the same voucher instead of minting another one.
+export async function finalizeVoucher(env, order, ref = null) {
+  let code = null;
+  let record = null;
+
+  // Idempotency anchor: once a real payment has been assigned a voucher code,
+  // keep that mapping forever in KV. A later webhook retry can then reuse the
+  // same code even if the previous attempt failed during email delivery.
+  if (ref) {
+    const existingCode = await env.VOUCHERS.get(`voucher-ref:${ref}`);
+    if (existingCode) {
+      code = existingCode;
+      const existingRaw = await env.VOUCHERS.get(code);
+      if (existingRaw) record = JSON.parse(existingRaw);
+    }
+  }
+
+  if (!record) {
+    code = code || generateCode();
+    const expires = new Date();
+    expires.setMonth(expires.getMonth() + 6);
+    const expiresDisplay = expires.toLocaleDateString("en-GB", {
+      day: "numeric", month: "long", year: "numeric",
+    });
+
+    record = {
+      code,
+      ...order,
+      status: "unredeemed",
+      createdAt: new Date().toISOString(),
+      expiresAt: expires.toISOString(),
+    };
+
+    await env.VOUCHERS.put(code, JSON.stringify(record));
+    if (ref) {
+      await env.VOUCHERS.put(`voucher-ref:${ref}`, code);
+    }
+  }
+
+  const expiresDisplay = new Date(record.expiresAt).toLocaleDateString("en-GB", {
     day: "numeric", month: "long", year: "numeric",
   });
-
-  const record = {
-    code,
-    ...order,
-    status: "unredeemed",
-    createdAt: new Date().toISOString(),
-    expiresAt: expires.toISOString(),
-  };
-
-  await env.VOUCHERS.put(code, JSON.stringify(record));
 
   const html = buildVoucherEmail({
     type: record.type,
@@ -124,24 +152,38 @@ export async function finalizeVoucher(env, order) {
       ? [record.recipientEmail]
       : [record.buyerEmail];
 
-  const emailRes = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: "Rica Spa <vouchers@ricaspa.beauty>",
-      to: recipients,
-      subject: "Your Rica Spa voucher is here",
-      html,
-    }),
-  });
+  let emailRes;
+  try {
+    emailRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "Rica Spa <vouchers@ricaspa.beauty>",
+        to: recipients,
+        subject: "Your Rica Spa voucher is here",
+        html,
+      }),
+    });
+  } catch (err) {
+    await recordEmailEvent(env, ref, "voucher", recipients.join(","), "failed", null, String(err));
+    throw new Error("Voucher saved but email request failed: " + String(err));
+  }
 
   if (!emailRes.ok) {
     const detail = await emailRes.text();
+    await recordEmailEvent(env, ref, "voucher", recipients.join(","), "failed", null, detail);
     throw new Error("Voucher saved but email failed to send: " + detail);
   }
+
+  let voucherProviderId = null;
+  try {
+    const result = await emailRes.clone().json();
+    voucherProviderId = result?.id || null;
+  } catch {}
+  await recordEmailEvent(env, ref, "voucher", recipients.join(","), "sent", voucherProviderId, null);
 
   const wentToRecipientOnly = record.giftingOthers && record.recipientEmail;
   let emailWarning = null;
@@ -174,11 +216,18 @@ export async function finalizeVoucher(env, order) {
       if (!confirmRes.ok) {
         const detail = await confirmRes.text();
         emailWarning = "Buyer confirmation email failed: " + detail;
+        await recordEmailEvent(env, ref, "buyer_confirmation", record.buyerEmail, "failed", null, detail);
+      } else {
+        let providerId = null;
+        try {
+          const result = await confirmRes.clone().json();
+          providerId = result?.id || null;
+        } catch {}
+        await recordEmailEvent(env, ref, "buyer_confirmation", record.buyerEmail, "sent", providerId, null);
       }
     } catch (err) {
-      // Voucher itself already delivered — don't fail the whole order on
-      // the confirmation copy, but do record it so it's visible.
       emailWarning = "Buyer confirmation email failed: " + String(err);
+      await recordEmailEvent(env, ref, "buyer_confirmation", record.buyerEmail, "failed", null, String(err));
     }
   }
 

@@ -1,29 +1,16 @@
 // POST /api/payment-webhook
 //
-// IntaSend calls this automatically when a payment's state changes, once
-// you've configured this URL (and a matching "challenge" string) in the
-// IntaSend dashboard under Webhooks. This is the authoritative finalization
-// point — don't rely on the browser redirect back to the site, since the
-// customer might close the tab before that happens.
-//
-// Setup: dashboard > Webhooks > set destination URL to
-// https://ricaspa.beauty/api/payment-webhook, and set a challenge string —
-// put that same string in the INTASEND_WEBHOOK_CHALLENGE env var here.
-//
-// IDEMPOTENCY: IntaSend can call this more than once for the same payment
-// (retries). The pending record is claimed (deleted) BEFORE we attempt to
-// finalize, so a duplicate call finds nothing left to process and safely
-// no-ops. If finalization itself fails after claiming, the order details
-// are preserved under "failed:REF" instead of being lost, so they can be
-// manually recovered.
-//
-// ORDER STATES (used by /api/order-status):
-//   pending:REF   — order started, payment not yet confirmed
-//   completed:REF — payment confirmed, voucher created (value = the code)
-//   failed:REF    — payment failed/canceled, or finalization errored
+// IntaSend's COMPLETE webhook is the authoritative payment-finalization point.
+// D1 claims the order first, preventing concurrent duplicate COMPLETE events
+// from issuing multiple vouchers. KV keeps the operational voucher records.
 
 import { finalizeVoucher } from "../_lib/voucherCore.js";
-import { claimPaymentForFinalization, markPaymentFailed, markFinalizationSuccess, markFinalizationFailed } from "../_lib/ledger.js";
+import {
+  claimPaymentForFinalization,
+  markPaymentFailed,
+  markFinalizationSuccess,
+  markFinalizationFailed,
+} from "../_lib/ledger.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -37,66 +24,62 @@ export async function onRequestPost(context) {
 
   const { challenge, state, api_ref: ref } = body;
 
-  // Verify this request actually came from IntaSend, not just anyone who
-  // found the URL.
   if (challenge !== env.INTASEND_WEBHOOK_CHALLENGE) {
     return new Response("Invalid challenge", { status: 401 });
   }
 
-  if (!ref) {
-    return new Response("Missing api_ref", { status: 400 });
-  }
+  if (!ref) return new Response("Missing api_ref", { status: 400 });
 
   if (state === "FAILED" || state === "CANCELED") {
-    // Record the failure so order-status can tell the customer honestly,
-    // instead of leaving them polling "pending" until it expires.
     await env.VOUCHERS.delete(`pending:${ref}`);
     await markPaymentFailed(env, ref, state);
     await env.VOUCHERS.put(`failed:${ref}`, JSON.stringify({ reason: state }), {
-      expirationTtl: 60 * 60 * 24, // keep failure record for a day
+      expirationTtl: 60 * 60 * 24,
     });
     return new Response("OK", { status: 200 });
   }
 
   if (state !== "COMPLETE") {
-    // Some other in-progress state — acknowledge, do nothing further.
     return new Response("OK", { status: 200 });
   }
 
-  // If D1 is configured, it is the atomic claim for finalization. This
-  // closes the race where two COMPLETE webhooks arrive together and both
-  // read the same KV pending record before either deletes it.
+  // D1 is authoritative when configured. A false claim means another webhook
+  // already owns or completed this ref; acknowledge the retry without doing
+  // anything twice. The null result is the legacy/no-D1 path.
   const d1Claim = await claimPaymentForFinalization(env, ref);
-  if (d1Claim === false) {
-    return new Response("OK", { status: 200 });
-  }
+  if (d1Claim === false) return new Response("OK", { status: 200 });
 
-  // KV remains the source of the actual order payload and voucher lookup.
-  // Claim it before finalization when D1 is not configured, preserving the
-  // existing safe behavior until the ledger binding is enabled.
   const pendingRaw = await env.VOUCHERS.get(`pending:${ref}`);
   if (!pendingRaw) {
+    // D1 may already know this order, but KV can be absent after a prior
+    // successful attempt. A duplicate is still safe to acknowledge.
     return new Response("OK", { status: 200 });
   }
-  await env.VOUCHERS.delete(`pending:${ref}`);
 
   try {
     const { order } = JSON.parse(pendingRaw);
-    const { code, emailWarning } = await finalizeVoucher(env, order);
+    const { code, emailWarning } = await finalizeVoucher(env, order, ref);
 
     await env.VOUCHERS.put(
       `completed:${ref}`,
       JSON.stringify({ code, emailWarning: emailWarning || null }),
-      { expirationTtl: 60 * 60 * 24 * 7 }
+      { expirationTtl: 60 * 60 * 24 * 30 }
     );
 
     await markFinalizationSuccess(env, ref, code, emailWarning);
+    await env.VOUCHERS.delete(`pending:${ref}`);
+    await env.VOUCHERS.delete(`failed:${ref}`);
     return new Response("OK", { status: 200 });
   } catch (err) {
-    await env.VOUCHERS.put(`failed:${ref}`, pendingRaw, {
-      expirationTtl: 60 * 60 * 24 * 7,
-    });
+    // Keep the pending order available for a future IntaSend retry. D1 also
+    // moves finalization_state back to pending, while preserving payment_state
+    // as completed. The voucher-ref:<ref> anchor means a retry reuses an
+    // already-created voucher rather than minting a second one.
     await markFinalizationFailed(env, ref, err);
-    return new Response("Error: " + String(err), { status: 500 });
+    await env.VOUCHERS.put(`failed:${ref}`, JSON.stringify({
+      reason: String(err),
+      retryable: true,
+    }), { expirationTtl: 60 * 60 * 24 * 7 });
+    return new Response("Finalization temporarily failed", { status: 500 });
   }
 }

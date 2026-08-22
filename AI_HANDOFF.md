@@ -401,3 +401,97 @@ Once `DB` is bound, `payment-webhook.js` atomically claims a successful payment 
 5. Build the owner dashboard against D1 (sales totals, date range, voucher status, redemption and revenue reporting).
 
 Do not make a live payment solely to test the D1 schema. The first ledger row can be verified from the `/api/initiate-payment` path once the binding is active.
+
+---
+
+# LATEST SESSION NOTE — D1 LIVE + POST-PAYMENT WIRING — 2026-08-21
+
+D1 database was created and remotely migrated successfully:
+
+- Database: `ricaspa-ledger`
+- Database ID: `cdf2839a-2f0f-4705-a327-563da5d2cb31`
+- Binding: `DB`
+- Remote verification returned `success: true` and showed:
+  - `orders`
+  - `email_events`
+  - Cloudflare/internal tables
+
+The project `wrangler.toml` now contains the real D1 binding.
+
+Post-payment hardening was implemented in the working project:
+
+1. `/api/initiate-payment`
+   - already records the order attempt in D1 before allowing checkout to proceed.
+
+2. `/api/payment-webhook`
+   - uses D1 as the idempotent claim for COMPLETE payments;
+   - duplicate COMPLETE webhooks are acknowledged without re-finalizing;
+   - finalization failures return the D1 finalization claim to `pending` while preserving `payment_state=completed`, allowing a retry;
+   - pending KV data is now deleted only after successful finalization;
+   - successful finalization clears the temporary failed marker.
+
+3. `voucherCore.js`
+   - real-payment finalization now receives the payment ref;
+   - creates a durable `voucher-ref:<ref>` KV idempotency anchor;
+   - a retry reuses an already-created voucher code instead of minting another voucher;
+   - voucher email Resend responses are explicitly checked;
+   - voucher email success/failure is recorded in D1 `email_events`;
+   - buyer confirmation email responses are explicitly checked and recorded;
+   - test-mode callers without a ref do not attempt D1 email-event inserts.
+
+4. `/api/order-status`
+   - reads D1 first when available;
+   - distinguishes completed, failed and pending states;
+   - recognizes `payment_state=completed` + `finalization_state=pending` as a payment-confirmed but still-finalizing state;
+   - keeps KV fallback for older/legacy orders.
+
+Validation performed:
+
+- Node syntax checks passed for the modified backend files.
+- No live payment was initiated.
+- Production D1 schema was already remotely verified before this code pass.
+
+Remaining work:
+
+- Deploy the updated Pages Functions/configuration.
+- Verify production Functions see `env.DB` after deployment.
+- Perform a local/mock webhook lifecycle test without real money.
+- Then perform one controlled live payment to verify IntaSend -> webhook -> D1 -> KV -> Resend -> browser end-to-end.
+- Build the owner dashboard on top of the D1 ledger after the write path is proven.
+
+Do NOT make another live payment until the updated code is deployed and local/mock validation is complete.
+
+## 2026-08-22 — synthetic D1/Resend test path hardened
+
+The production `/api/create-voucher` test endpoint was updated so a `testMode:true` request now mirrors the real order lifecycle instead of calling `finalizeVoucher()` without a ledger row.
+
+Synthetic test flow:
+
+```text
+create-voucher
+  -> generateRef()
+  -> KV pending:<ref>
+  -> D1 orders row (payment_provider = test)
+  -> claimPaymentForFinalization()
+  -> finalizeVoucher(ref)
+  -> KV voucher + voucher-ref:<ref>
+  -> real Resend voucher email
+  -> D1 email_events
+  -> D1 finalization completed
+  -> KV completed:<ref>
+  -> pending removed
+```
+
+The test endpoint response now includes `ref`, `code`, and `emailWarning`.
+
+This allows the complete voucher + D1 + Resend path to be tested for KES 0 without IntaSend/M-Pesa.
+
+Also fixed the D1 ledger helper so `recordOrderAttempt()` accepts a payment provider argument; normal purchases remain `intasend`, synthetic tests are recorded as `test`.
+
+Known verification state before this change:
+- The previous synthetic test returned `success: true` and reached voucher finalization.
+- `email_events` was empty because the old test endpoint did not create a D1 order/ref before calling `finalizeVoucher()`.
+- A previous diagnostic query incorrectly referenced `orders.amount`; the schema uses `orders.value`.
+
+NEXT ACTION:
+Deploy this version, run the existing test curl with `testMode:true`, then query the returned `ref` in D1. Verify the real email arrives. Do not make a live IntaSend payment yet.
