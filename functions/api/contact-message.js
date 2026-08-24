@@ -30,12 +30,25 @@ function generateContactRef() {
 }
 
 async function isRateLimited(env, ip) {
-  const key = `ratelimit:contact:${ip}`;
-  const current = await env.VOUCHERS.get(key);
-  const count = current ? parseInt(current, 10) : 0;
-  if (count >= 8) return true;
-  await env.VOUCHERS.put(key, String(count + 1), { expirationTtl: 600 });
-  return false;
+  try {
+    const key = `ratelimit:contact:${ip}`;
+    const current = await env.VOUCHERS.get(key);
+    const count = current ? parseInt(current, 10) : 0;
+    if (count >= 8) return true;
+    await env.VOUCHERS.put(key, String(count + 1), { expirationTtl: 600 });
+    return false;
+  } catch (err) {
+    console.error("isRateLimited failed, allowing request through", String(err));
+    return false;
+  }
+}
+
+async function safeLedgerCall(fn, label, ref) {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`${label} failed`, ref, String(err));
+  }
 }
 
 function isValidEmail(email) {
@@ -104,15 +117,15 @@ export async function onRequestPost(context) {
       }),
     });
   } catch {
-    await markContactNotifyState(env, ref, "failed");
+    await safeLedgerCall(() => markContactNotifyState(env, ref, "failed"), "markContactNotifyState", ref);
     return ok("Your message couldn't be sent right now — please WhatsApp us instead: +254 703 274 416.");
   }
 
   if (!res.ok) {
-    await markContactNotifyState(env, ref, "failed");
+    await safeLedgerCall(() => markContactNotifyState(env, ref, "failed"), "markContactNotifyState", ref);
     return ok("Your message couldn't be sent right now — please WhatsApp us instead: +254 703 274 416.");
   }
-  await markContactNotifyState(env, ref, "sent");
+  await safeLedgerCall(() => markContactNotifyState(env, ref, "sent"), "markContactNotifyState", ref);
 
   return ok("OK");
 }

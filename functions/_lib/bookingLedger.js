@@ -54,3 +54,38 @@ export async function getBooking(env, ref) {
   if (!database) return null;
   return database.prepare(`SELECT * FROM bookings WHERE ref = ?`).bind(ref).first();
 }
+
+// --- Slot tracker ---------------------------------------------------------
+
+export async function listBookingsByDate(env, date) {
+  const database = db(env);
+  if (!database) return [];
+  const result = await database.prepare(`
+    SELECT * FROM bookings WHERE preferred_date = ? ORDER BY preferred_time ASC
+  `).bind(date).all();
+  return result.results || [];
+}
+
+export async function listUpcomingBookings(env, fromDate, limit = 100) {
+  const database = db(env);
+  if (!database) return [];
+  const result = await database.prepare(`
+    SELECT * FROM bookings WHERE preferred_date >= ?
+    ORDER BY preferred_date ASC, preferred_time ASC LIMIT ?
+  `).bind(fromDate, limit).all();
+  return result.results || [];
+}
+
+const VALID_STATUSES = ["new", "confirmed", "declined", "completed", "no-show"];
+
+export async function updateBookingStatus(env, ref, status) {
+  if (!VALID_STATUSES.includes(status)) {
+    throw new Error(`Invalid status: ${status}`);
+  }
+  const database = db(env);
+  if (!database) throw new Error("No D1 binding — status can't be persisted on this deployment");
+  const result = await database.prepare(`
+    UPDATE bookings SET status = ?, updated_at = ? WHERE ref = ?
+  `).bind(status, new Date().toISOString(), ref).run();
+  return result.meta.changes > 0;
+}

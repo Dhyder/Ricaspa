@@ -589,3 +589,69 @@ IntaSend verification from section 18/10.
 entry here (dated) describing what changed, the way this entry and the
 2026-08-22 one did — that's the only reason this reconciliation was
 possible without guessing at intent.
+
+## 2026-08-24 — production 500 bug fixed + slot tracker added
+
+**Bug report from the site owner:** `500 https://ricaspa.beauty/api/book-session`.
+
+**Root cause:** `recordBooking()` in `book-session.js` was wrapped in
+try/catch, but `markNotifyEmailState()` / `markConfirmationEmailState()`
+right after it weren't — same gap in `contact-message.js`'s
+`markContactNotifyState()`. Most likely trigger: the `bookings` /
+`contact_messages` tables (migrations 0002/0003) were never actually
+applied to the live D1 database — Pages deploys don't run D1 migrations
+automatically, that's a separate explicit step
+(`wrangler d1 migrations apply ricaspa-ledger --remote`, or via the
+Cloudflare dashboard's D1 → Migrations tab). So `recordBooking()`'s INSERT
+failed, got caught and logged — but the notify email still sent
+successfully, and the very next D1 call (marking that email as sent) threw
+the same "no such table" error, uncaught this time. **Net effect: the
+booking notification probably did reach the spa's inbox even while the
+customer saw a raw 500.**
+
+**Fix:** every ledger write in both files now goes through a
+`safeLedgerCall()` wrapper (log-and-continue, matching the pattern
+`recordBooking` already used). `isRateLimited()` also now fails open if the
+KV binding is missing/broken, instead of crashing the whole request before
+anything else runs. Added a regression test
+(`test/booking-contact.test.mjs`, scenario 6b) that stubs a `DB` binding
+where every query throws, and asserts the endpoint still returns 200/"OK" —
+this is what would have caught the bug before it shipped.
+
+**Action needed regardless of this code fix:** confirm migrations 0002 and
+0003 have actually been applied to the live `ricaspa-ledger` D1 database.
+If they haven't, bookings/contact messages are currently email-only with
+no D1 record (which won't crash anymore, but you're losing the durable
+log). Check via the Cloudflare dashboard or `wrangler d1 migrations list
+ricaspa-ledger --remote`.
+
+**Also added — slot tracker**, per the site owner's request:
+- `functions/_lib/bookingLedger.js` — `listBookingsByDate()`,
+  `listUpcomingBookings()`, `updateBookingStatus()` (status ∈ new /
+  confirmed / declined / completed / no-show)
+- `functions/api/bookings-list.js` (GET, staff-gated) — bookings for a
+  date, or a rolling upcoming list
+- `functions/api/update-booking-status.js` (POST, staff-gated)
+- `staff-bookings.html` — new staff page, same `STAFF_SECRET` passphrase
+  as `/staff-vouchers.html` (no new secret needed), cross-linked from both
+  pages. Today / Upcoming / pick-a-date views, one-tap status buttons per
+  booking.
+
+**Deliberately NOT built:** hard double-booking prevention (rejecting a
+submission because a slot is "taken"). The business doesn't have a known
+single-resource constraint (could be multiple therapists/rooms), and every
+booking is explicitly a *request* the spa confirms by phone/WhatsApp, not
+an instant-confirmed appointment — so a hard block would encode a false
+assumption about capacity. The tracker instead gives staff visibility to
+catch conflicts themselves when confirming. If the business is in fact
+single-therapist/single-room and true conflict-blocking is wanted, that's
+a small follow-up (check `bookings` for an overlapping confirmed slot
+before accepting).
+
+**Test status:** `test/webhook-lifecycle.test.mjs` (51) +
+`test/booking-contact.test.mjs` (34, up from 22) — 85/85 passing.
+
+**NEXT ACTION:** deploy, verify the D1 migrations are actually applied
+(see above), submit a real booking through the live form and confirm it
+now returns success instead of a 500, then check `/staff-bookings.html`
+shows it.

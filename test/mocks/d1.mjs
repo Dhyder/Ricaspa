@@ -37,6 +37,10 @@ export function createMockD1() {
               const row = stmt.get(...args);
               return row === undefined ? null : row;
             },
+            async all() {
+              const rows = stmt.all(...args);
+              return { results: rows, success: true };
+            },
           };
         },
         // ledger.js never calls prepare(...).run()/.first() without bind()
@@ -48,6 +52,10 @@ export function createMockD1() {
         async first() {
           const row = stmt.get();
           return row === undefined ? null : row;
+        },
+        async all() {
+          const rows = stmt.all();
+          return { results: rows, success: true };
         },
       };
     },

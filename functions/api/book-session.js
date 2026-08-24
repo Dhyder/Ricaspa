@@ -30,14 +30,37 @@ function generateBookingRef() {
 
 // Same deterrent pattern as initiate-payment.js, isolated under its own KV
 // key prefix so booking spam and voucher-purchase abuse don't share a
-// counter.
+// counter. Fails OPEN (treated as "not limited") if VOUCHERS is missing or
+// misbehaving — a broken rate limiter shouldn't take the whole endpoint
+// down with it.
 async function isRateLimited(env, ip) {
-  const key = `ratelimit:booking:${ip}`;
-  const current = await env.VOUCHERS.get(key);
-  const count = current ? parseInt(current, 10) : 0;
-  if (count >= 8) return true;
-  await env.VOUCHERS.put(key, String(count + 1), { expirationTtl: 600 });
-  return false;
+  try {
+    const key = `ratelimit:booking:${ip}`;
+    const current = await env.VOUCHERS.get(key);
+    const count = current ? parseInt(current, 10) : 0;
+    if (count >= 8) return true;
+    await env.VOUCHERS.put(key, String(count + 1), { expirationTtl: 600 });
+    return false;
+  } catch (err) {
+    console.error("isRateLimited failed, allowing request through", String(err));
+    return false;
+  }
+}
+
+// Wraps every bookingLedger.js call so a D1 problem (missing binding,
+// migration not yet applied, whatever) can never surface as an uncaught
+// 500 — it's recorded to the console and the booking/email flow continues.
+// This is the fix for a real production bug: recordBooking() alone used to
+// be wrapped like this, but the mark*State() calls right after weren't, so
+// a D1 failure on THOSE calls (e.g. bookings table not migrated yet) threw
+// uncaught after the notify email had already sent — the customer's
+// request went through but they saw a raw 500.
+async function safeLedgerCall(fn, label, ref) {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`${label} failed`, ref, String(err));
+  }
 }
 
 function isValidEmail(email) {
@@ -114,15 +137,15 @@ export async function onRequestPost(context) {
       }),
     });
   } catch (err) {
-    await markNotifyEmailState(env, ref, "failed");
+    await safeLedgerCall(() => markNotifyEmailState(env, ref, "failed"), "markNotifyEmailState", ref);
     return ok("Your request couldn't be sent right now — please WhatsApp us instead so we don't miss you: +254 703 274 416.");
   }
 
   if (!notifyRes.ok) {
-    await markNotifyEmailState(env, ref, "failed");
+    await safeLedgerCall(() => markNotifyEmailState(env, ref, "failed"), "markNotifyEmailState", ref);
     return ok("Your request couldn't be sent right now — please WhatsApp us instead so we don't miss you: +254 703 274 416.");
   }
-  await markNotifyEmailState(env, ref, "sent");
+  await safeLedgerCall(() => markNotifyEmailState(env, ref, "sent"), "markNotifyEmailState", ref);
 
   // Customer confirmation email — best-effort, doesn't block the "OK"
   // response since the notify email (the part that actually matters to the
@@ -148,9 +171,13 @@ export async function onRequestPost(context) {
           </div>`,
       }),
     });
-    await markConfirmationEmailState(env, ref, confirmRes.ok ? "sent" : "failed");
+    await safeLedgerCall(
+      () => markConfirmationEmailState(env, ref, confirmRes.ok ? "sent" : "failed"),
+      "markConfirmationEmailState",
+      ref
+    );
   } catch {
-    await markConfirmationEmailState(env, ref, "failed");
+    await safeLedgerCall(() => markConfirmationEmailState(env, ref, "failed"), "markConfirmationEmailState", ref);
   }
 
   return ok("OK");

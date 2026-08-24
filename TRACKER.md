@@ -2,6 +2,12 @@
 
 ## 🔴 Critical — verify before any real launch
 
+- [ ] **Confirm migrations 0002 and 0003 are actually applied to the live
+      D1 database.** Very likely cause of a real production 500 on
+      `/api/book-session` (fixed in code — see below — but the underlying
+      "did the migration run" question is still open). Check via
+      `wrangler d1 migrations list ricaspa-ledger --remote` or the
+      Cloudflare dashboard.
 - [ ] **Confirm every required env var is actually set in Cloudflare.**
       `STAFF_SECRET` was referenced in code for two sessions without ever
       being set — don't assume the others are set just because the code
@@ -71,6 +77,15 @@
       Functions** (`/api/book-session`, `/api/contact-message`) — Resend +
       D1, same pattern as the rest of the app, no third-party dependency or
       hardcoded public access keys in client JS.
+- [x] **Fixed a real production 500 on `/api/book-session`** — some D1
+      ledger writes weren't wrapped in try/catch and could throw uncaught
+      after the notify email had already sent. All ledger calls in
+      `book-session.js`/`contact-message.js` now degrade instead of
+      crashing; regression test added.
+- [x] **Slot tracker** — `/staff-bookings.html`, staff-gated (same
+      passphrase as the voucher desk), Today/Upcoming/date views of booking
+      requests with one-tap status updates (confirmed/declined/completed/
+      no-show). Doesn't hard-block double-booking (see 🟡 below for why).
 - [ ] Error responses still sometimes echo raw internal error strings —
       fine while debugging, worth trimming before real customers can
       trigger and see them
@@ -89,8 +104,15 @@
       QR. Spec'd in `AI_HANDOFF.md` (search "rotating QR"): a "My Voucher"
       page the email links to, polling a short-lived token endpoint every
       ~30s so the QR can't just be screenshotted and reused. Not started.
-- [ ] No dashboard/list view of all vouchers sold, bookings, or contact
-      messages — everything's in D1 now, but only queryable directly, no UI
+- [ ] No dashboard/list view of all vouchers sold — only individually
+      queryable in D1 directly (the slot tracker covers this for bookings,
+      not yet done for vouchers)
+- [ ] **Hard double-booking prevention not implemented** — the slot
+      tracker gives staff visibility, but doesn't reject a submission for
+      an already-requested date/time. Left this way deliberately since
+      resource capacity (rooms/therapists) isn't known — see
+      `AI_HANDOFF.md`'s 2026-08-24 entry for the reasoning and how to add
+      it if the business turns out to be single-resource.
 
 ## ✅ Done
 
