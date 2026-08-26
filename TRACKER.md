@@ -11,15 +11,26 @@
 - [ ] **Confirm every required env var is actually set in Cloudflare.**
       `STAFF_SECRET` was referenced in code for two sessions without ever
       being set — don't assume the others are set just because the code
-      references them. Full checklist in `INTASEND_SETUP.md` §0:
+      references them. **Confirmed 2026-08-24: `BOOKING_NOTIFY_EMAIL` was
+      never set**, which was silently breaking `/api/book-session`'s email
+      send (no crash, just a swallowed failure — logging added, see
+      `AI_HANDOFF.md`). Assume `CONTACT_NOTIFY_EMAIL` is in the same state
+      until checked. Full checklist in `INTASEND_SETUP.md` §0:
       `INTASEND_PUBLISHABLE_KEY`, `INTASEND_SECRET_KEY`,
       `INTASEND_WEBHOOK_CHALLENGE`, `RESEND_API_KEY`, `STAFF_SECRET`,
-      `TEST_MODE_SECRET`, `VOUCHER_SIGNING_SECRET`, `BOOKING_NOTIFY_EMAIL`
-      (new), `CONTACT_NOTIFY_EMAIL` (new) — plus the `DB` and `VOUCHERS`
-      bindings.
+      `TEST_MODE_SECRET`, `VOUCHER_SIGNING_SECRET`, `BOOKING_NOTIFY_EMAIL`,
+      `CONTACT_NOTIFY_EMAIL`, `TURNSTILE_SECRET_KEY` — plus the `DB` and
+      `VOUCHERS` bindings. Set in the **Production** environment
+      specifically, then redeploy:
+      `npx wrangler pages deploy . --project-name=ricaspa`.
+- [x] **Turnstile site key set** (`0x4AAAAAAEcnrbs179lUlLpV`) in both
+      forms in `index.html`, 2026-08-24. Still need to confirm
+      `TURNSTILE_SECRET_KEY` is set in Cloudflare Production env vars —
+      the site key alone doesn't verify anything server-side, both halves
+      are required (see `AI_HANDOFF.md`'s bot-protection entry).
 - [ ] **Verify the booking and contact forms against the real deployment,
       not just the mock test suite.** `test/booking-contact.test.mjs`
-      passes locally (22/22), but that only proves the code logic — submit
+      passes locally (34/34), but that only proves the code logic — submit
       both forms for real once deployed and confirm the emails actually
       land and D1 rows appear.
 - [ ] **End-to-end payment confirmation still not fully verified.** A real
@@ -77,6 +88,12 @@
       Functions** (`/api/book-session`, `/api/contact-message`) — Resend +
       D1, same pattern as the rest of the app, no third-party dependency or
       hardcoded public access keys in client JS.
+- [x] **Bot protection on booking + contact forms** — honeypot field
+      (dropped silently) + Cloudflare Turnstile (verified server-side in
+      `functions/_lib/turnstile.js`). Degrades to honeypot-only rather than
+      blocking every submission if `TURNSTILE_SECRET_KEY` isn't set — but
+      the site key placeholder in `index.html` MUST be replaced before
+      deploy or real submissions silently fail (see 🔴 above).
 - [x] **Fixed a real production 500 on `/api/book-session`** — some D1
       ledger writes weren't wrapped in try/catch and could throw uncaught
       after the notify email had already sent. All ledger calls in
@@ -113,6 +130,15 @@
       resource capacity (rooms/therapists) isn't known — see
       `AI_HANDOFF.md`'s 2026-08-24 entry for the reasoning and how to add
       it if the business turns out to be single-resource.
+- [ ] **Booking deposit / paid checkout — explicitly deferred, not a
+      priority right now.** Idea: reuse the existing IntaSend + D1 ledger
+      infra (already built for vouchers) to charge a small deposit to
+      confirm a booking slot, instead of "we'll call to confirm." Would
+      also help filter joke submissions as a side effect, but that's now
+      separately handled by Turnstile + honeypot, so this isn't blocking
+      anything — it's a business-model change (paid slot vs. free request)
+      more than a technical one, worth deciding deliberately rather than
+      bundling into a bot-fix pass.
 
 ## ✅ Done
 

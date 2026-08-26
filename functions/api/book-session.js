@@ -16,9 +16,13 @@
 // Requires (Cloudflare Pages > Settings > Environment variables):
 //   RESEND_API_KEY        — already required for voucher emails
 //   BOOKING_NOTIFY_EMAIL  — the inbox that booking requests should land in
+//   TURNSTILE_SECRET_KEY  — bot check; see functions/_lib/turnstile.js
+//                           (optional in the sense that it degrades rather
+//                           than blocks if unset — see that file)
 
 import { escapeHtml } from "../_lib/voucherCore.js";
 import { recordBooking, markNotifyEmailState, markConfirmationEmailState } from "../_lib/bookingLedger.js";
+import { verifyTurnstile } from "../_lib/turnstile.js";
 
 function ok(message = "OK") {
   return new Response(message, { status: 200, headers: { "Content-Type": "text/plain" } });
@@ -82,6 +86,31 @@ export async function onRequestPost(context) {
     return ok("Could not read the form submission. Please try again.");
   }
 
+  // Honeypot: a real user never sees or fills assets/css/main.css's
+  // .hp-field. Anything in it is a bot filling every field it finds.
+  // Pretend success rather than showing an error — no feedback loop for
+  // whatever's scripting this.
+  if ((form.get("website") || "").toString().trim() !== "") {
+    console.error("book-session: honeypot triggered, dropping silently", ip);
+    return ok("OK");
+  }
+
+  const turnstileToken = (form.get("cf-turnstile-response") || "").toString();
+  const turnstileResult = await verifyTurnstile(env, turnstileToken, ip);
+  if (!turnstileResult.ok) {
+    if (turnstileResult.reason === "missing-token") {
+      // No token at all → essentially always a direct scripted POST that
+      // never loaded the page/widget, not a real user. Same silent
+      // treatment as the honeypot, for the same reason.
+      console.error("book-session: no Turnstile token present, dropping silently", ip);
+      return ok("OK");
+    }
+    // Token was present but Cloudflare rejected it (expired, already used,
+    // network hiccup verifying) — this CAN happen to a real user, so give
+    // them an actual path to recover instead of a fake success.
+    return ok("Verification check failed or expired — please refresh the page and try again.");
+  }
+
   const name = (form.get("name") || "").toString().trim();
   const email = (form.get("email") || "").toString().trim();
   const phone = (form.get("phone") || "").toString().trim();
@@ -105,6 +134,19 @@ export async function onRequestPost(context) {
     // A D1 failure shouldn't block the booking itself — the notify email
     // below is still the primary channel. Fall through.
     console.error("recordBooking failed", ref, String(err));
+  }
+
+  if (!env.RESEND_API_KEY || !env.BOOKING_NOTIFY_EMAIL) {
+    // This is almost certainly what's happening in production right now —
+    // logging it explicitly and by name instead of letting it fail as a
+    // generic Resend error further down, so it shows up unmistakably in
+    // `wrangler pages deployment tail` / the dashboard Logs tab.
+    console.error(
+      "book-session misconfigured:",
+      !env.RESEND_API_KEY ? "RESEND_API_KEY is not set. " : "",
+      !env.BOOKING_NOTIFY_EMAIL ? "BOOKING_NOTIFY_EMAIL is not set." : ""
+    );
+    return ok("Your request couldn't be sent right now — please WhatsApp us instead so we don't miss you: +254 703 274 416.");
   }
 
   const notifyHtml = `
@@ -137,11 +179,14 @@ export async function onRequestPost(context) {
       }),
     });
   } catch (err) {
+    console.error("Resend fetch threw (network/DNS/etc)", ref, String(err));
     await safeLedgerCall(() => markNotifyEmailState(env, ref, "failed"), "markNotifyEmailState", ref);
     return ok("Your request couldn't be sent right now — please WhatsApp us instead so we don't miss you: +254 703 274 416.");
   }
 
   if (!notifyRes.ok) {
+    const errBody = await notifyRes.text().catch(() => "<could not read response body>");
+    console.error("Resend rejected the notify email", ref, notifyRes.status, errBody);
     await safeLedgerCall(() => markNotifyEmailState(env, ref, "failed"), "markNotifyEmailState", ref);
     return ok("Your request couldn't be sent right now — please WhatsApp us instead so we don't miss you: +254 703 274 416.");
   }

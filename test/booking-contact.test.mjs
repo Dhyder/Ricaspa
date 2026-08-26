@@ -12,6 +12,7 @@ import { onRequestPost as updateBookingStatus } from "../functions/api/update-bo
 import { createMockKV } from "./mocks/kv.mjs";
 import { createMockD1 } from "./mocks/d1.mjs";
 import { installMockResend } from "./mocks/resend.mjs";
+import { installMockTurnstile } from "./mocks/turnstile.mjs";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -29,12 +30,17 @@ function makeEnv() {
     RESEND_API_KEY: "resend_test_mock",
     BOOKING_NOTIFY_EMAIL: "spa-owner@example.com",
     CONTACT_NOTIFY_EMAIL: "spa-owner@example.com",
+    TURNSTILE_SECRET_KEY: "turnstile_test_mock",
   };
 }
 
 function formPost(url, fields, headers = {}) {
   const fd = new FormData();
-  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  // Every existing scenario is exercising business logic that sits AFTER
+  // the bot checks, so give them a passing Turnstile token by default —
+  // scenarios that specifically test the bot checks (10, 11) override this.
+  const merged = { "cf-turnstile-response": "valid-test-token", ...fields };
+  for (const [k, v] of Object.entries(merged)) fd.set(k, v);
   return new Request(url, { method: "POST", body: fd, headers });
 }
 
@@ -217,6 +223,22 @@ async function scenarioContactMissingMessage(env) {
   assert(body.trim() !== "OK", "rejects a submission with no message");
 }
 
+async function scenarioContactBotChecks(env, resend) {
+  section("8b. Contact — honeypot + Turnstile share the same protection");
+  resend.setMode("success");
+  const before = resend.calls.length;
+
+  const honeypotRes = await contactMessage({
+    request: formPost("https://ricaspa.beauty/api/contact-message", {
+      name: "Bot", email: "bot@example.com", message: "buy cheap stuff now",
+      website: "http://spam.example",
+    }, { "cf-connecting-ip": "10.5.0.1" }),
+    env,
+  });
+  assert((await honeypotRes.text()).trim() === "OK", "contact form honeypot behaves the same as the booking form's");
+  assert(resend.calls.length === before, "no email sent for the honeypot-tripped contact message");
+}
+
 // ---------------------------------------------------------------------
 // Scenario 9: slot tracker (staff-only list + status update)
 // ---------------------------------------------------------------------
@@ -283,9 +305,88 @@ async function scenarioSlotTracker(env, resend) {
   assert(upcoming.bookings.length >= 2, "upcoming view includes bookings without needing an exact date match");
 }
 
+// ---------------------------------------------------------------------
+// Scenario 10: honeypot field
+// ---------------------------------------------------------------------
+async function scenarioHoneypot(env, resend) {
+  section("10. Bot check — honeypot field");
+  resend.setMode("success");
+  const before = resend.calls.length;
+
+  const res = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "Bot", email: "bot@example.com", phone: "254700000000",
+      date: "2026-09-01", time: "10:00",
+      website: "http://spammy-link.example", // a real user never fills this
+    }, { "cf-connecting-ip": "10.4.0.1" }),
+    env,
+  });
+  const body = await res.text();
+  assert(body.trim() === "OK", "honeypot trip returns a fake success, no error feedback for the bot");
+  assert(resend.calls.length === before, "no email sent — the submission never actually processed");
+
+  const rows = await env.DB._raw("SELECT * FROM bookings WHERE email = ?", "bot@example.com");
+  assert(rows.length === 0, "nothing recorded in D1 either — honeypot trips are dropped entirely, not logged as bookings");
+}
+
+// ---------------------------------------------------------------------
+// Scenario 11: Turnstile bot check
+// ---------------------------------------------------------------------
+async function scenarioTurnstile(env, resend, turnstile) {
+  section("11. Bot check — Turnstile verification");
+  resend.setMode("success");
+
+  turnstile.setMode("success");
+  const goodRes = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "Real Person", email: "real@example.com", phone: "254700000001",
+      date: "2026-09-01", time: "10:00",
+    }, { "cf-connecting-ip": "10.4.0.2" }),
+    env,
+  });
+  assert((await goodRes.text()).trim() === "OK", "valid Turnstile token lets a real submission through");
+  assert(turnstile.calls.some((c) => c.token === "valid-test-token"), "the token was actually sent to Cloudflare for verification, not just trusted blindly");
+  assert(turnstile.calls.some((c) => c.remoteip === "10.4.0.2"), "the submitter's IP is passed along to siteverify");
+
+  const before = resend.calls.length;
+  const missingTokenRes = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "Scripted Bot", email: "scripted@example.com", phone: "254700000002",
+      date: "2026-09-01", time: "11:00", "cf-turnstile-response": "",
+    }, { "cf-connecting-ip": "10.4.0.3" }),
+    env,
+  });
+  assert((await missingTokenRes.text()).trim() === "OK", "no token at all (never loaded the widget) also gets a fake success, same as the honeypot");
+  assert(resend.calls.length === before, "no email sent for the tokenless request");
+
+  turnstile.setMode("fail");
+  const failedRes = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "Expired Token Person", email: "expired@example.com", phone: "254700000003",
+      date: "2026-09-01", time: "12:00",
+    }, { "cf-connecting-ip": "10.4.0.4" }),
+    env,
+  });
+  const failedBody = await failedRes.text();
+  assert(failedBody.trim() !== "OK", "a present-but-rejected token (e.g. expired) gets a REAL error, not a silent drop");
+  assert(/verification/i.test(failedBody), "the error is specific enough for a genuine user to know to refresh and retry");
+  turnstile.setMode("success");
+
+  const noSecretEnv = { ...env, TURNSTILE_SECRET_KEY: undefined };
+  const degradedRes = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "During Rollout", email: "rollout@example.com", phone: "254700000004",
+      date: "2026-09-01", time: "13:00",
+    }, { "cf-connecting-ip": "10.4.0.5" }),
+    env: noSecretEnv,
+  });
+  assert((await degradedRes.text()).trim() === "OK", "if TURNSTILE_SECRET_KEY isn't configured yet, bookings still go through (degrade, don't block) rather than breaking every submission");
+}
+
 async function main() {
   console.log("Rica Spa — booking + contact form backend test (no network, no third-party form service)\n");
   const env = makeEnv();
+  const turnstile = installMockTurnstile();
   const resend = installMockResend();
   try {
     await scenarioBookingHappyPath(env, resend);
@@ -297,9 +398,13 @@ async function main() {
     await scenarioBookingBrokenD1Table(resend);
     await scenarioContactHappyPath(env, resend);
     await scenarioContactMissingMessage(env);
+    await scenarioContactBotChecks(makeEnv(), resend);
     await scenarioSlotTracker(makeEnv(), resend);
+    await scenarioHoneypot(makeEnv(), resend);
+    await scenarioTurnstile(makeEnv(), resend, turnstile);
   } finally {
     resend.restore();
+    turnstile.restore();
     env.DB._close();
   }
 

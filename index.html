@@ -36,6 +36,14 @@
   <!-- Main CSS File -->
   <link href="assets/css/main.css" rel="stylesheet">
 
+  <!-- Cloudflare Turnstile — bot check on the booking + contact forms.
+       Renders itself into any div.cf-turnstile on the page and injects a
+       hidden "cf-turnstile-response" input inside it, which travels along
+       with the rest of the form's FormData automatically — no extra JS
+       needed here, verification happens server-side in book-session.js /
+       contact-message.js. -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
   <!-- <script src="//code.tidio.co/l1mzurgpi1k8lvc4w7syeqpzphrzly9p.js" async></script> -->
 
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8475032650598395"
@@ -812,6 +820,16 @@
                     <textarea class="form-control" name="message" rows="3"
                       placeholder="Special Requests (Optional)"></textarea>
                   </div>
+
+                  <!-- Honeypot: real form field, hidden via CSS (not type="hidden",
+                       which unsophisticated bots specifically skip). Humans never
+                       see or fill it; anything filled in here is treated as a bot. -->
+                  <div class="hp-field" aria-hidden="true">
+                    <label for="booking-website">Leave this field empty</label>
+                    <input type="text" name="website" id="booking-website" tabindex="-1" autocomplete="off">
+                  </div>
+
+                  <div class="cf-turnstile mt-3" data-sitekey="0x4AAAAAAEcnrbs179lUlLpV"></div>
                 </div>
 
                 <div class="my-3">
@@ -1073,6 +1091,16 @@
                           style="height: 180px" required=""></textarea>
                       </div>
                     </div>
+                  </div>
+
+                  <!-- Honeypot, same pattern as the booking form -->
+                  <div class="hp-field" aria-hidden="true">
+                    <label for="contact-website">Leave this field empty</label>
+                    <input type="text" name="website" id="contact-website" tabindex="-1" autocomplete="off">
+                  </div>
+
+                  <div class="col-12">
+                    <div class="cf-turnstile" data-sitekey="0x4AAAAAAEcnrbs179lUlLpV"></div>
                   </div>
 
                   <div class="col-12">

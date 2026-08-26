@@ -655,3 +655,137 @@ before accepting).
 (see above), submit a real booking through the live form and confirm it
 now returns success instead of a 500, then check `/staff-bookings.html`
 shows it.
+
+## 2026-08-24, later same day — booking form still failing after the 500 fix
+
+**Site owner report:** after the 500 fix deployed, booking submissions now
+return the friendly fallback message instead of crashing — *"Your request
+couldn't be sent right now — please WhatsApp us instead..."* — meaning the
+code path is working correctly (no crash), but the Resend email send
+itself is failing, and there was no logging anywhere of *why*.
+
+**Root cause, confirmed with the site owner directly:** `BOOKING_NOTIFY_EMAIL`
+was never set in Cloudflare — it's a var introduced in the 2026-08-23
+booking-backend session but never actually added to the dashboard. Same is
+almost certainly true of `CONTACT_NOTIFY_EMAIL`. Without it, the Resend
+API call sends `to: [undefined]`, which Resend rejects.
+
+**Fix — two parts:**
+1. **Diagnostics added** to both `book-session.js` and `contact-message.js`:
+   an explicit upfront check for `RESEND_API_KEY`/`BOOKING_NOTIFY_EMAIL`
+   (or `CONTACT_NOTIFY_EMAIL`) that logs by variable name via
+   `console.error` before even attempting the Resend call, instead of
+   letting it fail as a generic downstream error. Also, the Resend
+   failure paths (`catch` block and `!res.ok` block) now log the actual
+   thrown error / response status + body — previously these were silently
+   swallowed, which is why the site owner's report came with no way to
+   diagnose it from logs.
+2. **Action required from the site owner** (code can't fix this part —
+   it's a missing config value, not a bug): set in Cloudflare dashboard →
+   Pages project → Settings → Environment variables → **Production**
+   environment specifically (Preview is separate):
+   ```
+   BOOKING_NOTIFY_EMAIL = <spa's real inbox>
+   CONTACT_NOTIFY_EMAIL = <spa's real inbox>
+   ```
+   Then redeploy — env var changes don't apply to an already-running
+   deployment:
+   ```
+   npx wrangler pages deploy . --project-name=ricaspa
+   ```
+   (Matches the command already documented in `INTASEND_SETUP.md`. If
+   deploying via a connected GitHub repo instead of the CLI, a new
+   commit/push or "Retry deployment" in the dashboard achieves the same.)
+
+**If it still fails after that:** next most likely cause is Resend
+rejecting the `from` address (`bookings@ricaspa.beauty` /
+`contact@ricaspa.beauty`) — happens if `ricaspa.beauty` was verified in
+Resend as a single sender address rather than full domain verification,
+in which case only that one exact address can send. Check the Resend
+dashboard's Domains tab. With the new logging, `wrangler pages deployment
+tail` (or the dashboard Logs tab) will now show the exact Resend rejection
+reason instead of nothing.
+
+**Test status:** still 85/85 (`webhook-lifecycle.test.mjs` 51 +
+`booking-contact.test.mjs` 34) — this was a logging/diagnostics addition,
+no behavior change to the success paths, confirmed by re-running both
+suites.
+
+**NEXT ACTION:** site owner sets `BOOKING_NOTIFY_EMAIL` and
+`CONTACT_NOTIFY_EMAIL` in Production, redeploys, retests both forms live.
+If it fails again, check the logs first this time — the reason will
+actually be visible now.
+
+## 2026-08-24, later still — bot protection added to booking + contact forms
+
+**Site owner request:** eliminate joke/bot submissions on the booking and
+contact forms; also floated a booking-deposit/checkout idea but confirmed
+it's a "maybe later," not wanted right now.
+
+**Built — two-layer bot check, both forms:**
+1. **Honeypot** — a real (not `type="hidden"`) text input, `name="website"`,
+   hidden off-screen via `.hp-field` in `main.css` rather than
+   `display:none` (some scrapers specifically skip `display:none`/
+   `visibility:hidden` fields; off-screen positioning is a more reliable
+   trap). `tabindex="-1"` and `autocomplete="off"` so it's unreachable by
+   keyboard nav or autofill. Anything filled in it → treated as a bot,
+   dropped silently (fake "OK" response, nothing recorded in D1, no email
+   sent) — no error feedback that would help a bot adapt.
+2. **Cloudflare Turnstile** — `functions/_lib/turnstile.js`,
+   `verifyTurnstile(env, token, remoteip)`, called from both
+   `book-session.js` and `contact-message.js` right after the honeypot
+   check. Widget added to both forms in `index.html`
+   (`<div class="cf-turnstile" data-sitekey="YOUR_TURNSTILE_SITE_KEY">`) —
+   **that placeholder still needs to be swapped for a real site key**, see
+   below.
+
+**Three distinct outcomes, deliberately different:**
+- **No token at all** (`cf-turnstile-response` missing/empty) → silent
+  fake success, same as honeypot. This is what a direct scripted POST
+  looks like (never loaded the page, so the widget never ran) — a real
+  browser gets a token within ~1-2s of page load.
+- **Token present but Cloudflare rejects it** (expired — tokens last ~5
+  min — or already used, or a genuine network hiccup verifying) → a REAL,
+  visible error: *"Verification check failed or expired — please refresh
+  the page and try again."* This case CAN happen to a real user, so unlike
+  the honeypot/missing-token cases it doesn't fail silently.
+- **`TURNSTILE_SECRET_KEY` not configured** → degrades rather than blocks:
+  logs loudly via `console.error` and lets the submission through, relying
+  on the honeypot + existing rate limiting alone. Deliberately NOT a hard
+  failure — after the `BOOKING_NOTIFY_EMAIL` incident earlier today, a
+  missing-secret-blocks-everything design felt like asking for a repeat.
+
+**Action needed from the site owner (code can't do this part):**
+1. Cloudflare dashboard → Turnstile → create a widget for `ricaspa.beauty`
+   → get a **site key** and a **secret key**.
+2. Set `TURNSTILE_SECRET_KEY` in Cloudflare Pages env vars (Production).
+3. Replace both `data-sitekey="YOUR_TURNSTILE_SITE_KEY"` placeholders in
+   `index.html` (booking form + contact form) with the real site key —
+   site keys are public by design (visible in every page load), so this
+   one goes directly in the HTML, not an env var.
+4. Redeploy: `npx wrangler pages deploy . --project-name=ricaspa`.
+
+Until step 3 happens, the widget div will render but Turnstile won't
+recognize the placeholder site key — likely means no token gets generated,
+which (per the "no token" behavior above) means every real booking gets
+silently dropped as if it were a bot. **Don't deploy this without doing
+step 1-3 together**, or real customers' bookings will vanish with a fake
+"success" message and no error anywhere to explain why.
+
+**Deposit/checkout idea:** explicitly deferred by the site owner, not
+built. If revisited, it would reuse the existing IntaSend + D1 ledger
+infrastructure already built for vouchers (`initiate-payment.js`,
+`payment-webhook.js`, `ledger.js`) rather than inventing a second payment
+path — the booking would move from "request the spa confirms" to "pay to
+hold a slot," which is a business-model call, not just a technical one.
+
+**Test status:** `test/webhook-lifecycle.test.mjs` (51) +
+`test/booking-contact.test.mjs` (47, up from 34 — added honeypot +
+Turnstile scenarios for both forms, including the token-missing,
+token-rejected, and secret-not-configured paths) — 98/98 passing.
+
+**NEXT ACTION:** site owner completes the Turnstile setup steps above
+(this is the one that actually matters — the code is already deployed-
+ready but non-functional as a bot check until the real site key is in
+place), then submit a real booking and contact message live to confirm
+neither gets silently eaten.

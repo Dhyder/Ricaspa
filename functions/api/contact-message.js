@@ -17,9 +17,11 @@
 // Requires (Cloudflare Pages > Settings > Environment variables):
 //   RESEND_API_KEY
 //   CONTACT_NOTIFY_EMAIL — the inbox contact messages should land in
+//   TURNSTILE_SECRET_KEY — bot check; see functions/_lib/turnstile.js
 
 import { escapeHtml } from "../_lib/voucherCore.js";
 import { recordContactMessage, markContactNotifyState } from "../_lib/contactLedger.js";
+import { verifyTurnstile } from "../_lib/turnstile.js";
 
 function ok(message = "OK") {
   return new Response(message, { status: 200, headers: { "Content-Type": "text/plain" } });
@@ -70,6 +72,21 @@ export async function onRequestPost(context) {
     return ok("Could not read the form submission. Please try again.");
   }
 
+  if ((form.get("website") || "").toString().trim() !== "") {
+    console.error("contact-message: honeypot triggered, dropping silently", ip);
+    return ok("OK");
+  }
+
+  const turnstileToken = (form.get("cf-turnstile-response") || "").toString();
+  const turnstileResult = await verifyTurnstile(env, turnstileToken, ip);
+  if (!turnstileResult.ok) {
+    if (turnstileResult.reason === "missing-token") {
+      console.error("contact-message: no Turnstile token present, dropping silently", ip);
+      return ok("OK");
+    }
+    return ok("Verification check failed or expired — please refresh the page and try again.");
+  }
+
   const name = (form.get("name") || "").toString().trim();
   const email = (form.get("email") || "").toString().trim();
   const subject = (form.get("subject") || "").toString().trim();
@@ -88,6 +105,15 @@ export async function onRequestPost(context) {
     await recordContactMessage(env, ref, { name, email, subject, message });
   } catch (err) {
     console.error("recordContactMessage failed", ref, String(err));
+  }
+
+  if (!env.RESEND_API_KEY || !env.CONTACT_NOTIFY_EMAIL) {
+    console.error(
+      "contact-message misconfigured:",
+      !env.RESEND_API_KEY ? "RESEND_API_KEY is not set. " : "",
+      !env.CONTACT_NOTIFY_EMAIL ? "CONTACT_NOTIFY_EMAIL is not set." : ""
+    );
+    return ok("Your message couldn't be sent right now — please WhatsApp us instead: +254 703 274 416.");
   }
 
   const html = `
@@ -116,12 +142,15 @@ export async function onRequestPost(context) {
         html,
       }),
     });
-  } catch {
+  } catch (err) {
+    console.error("Resend fetch threw (network/DNS/etc)", ref, String(err));
     await safeLedgerCall(() => markContactNotifyState(env, ref, "failed"), "markContactNotifyState", ref);
     return ok("Your message couldn't be sent right now — please WhatsApp us instead: +254 703 274 416.");
   }
 
   if (!res.ok) {
+    const errBody = await res.text().catch(() => "<could not read response body>");
+    console.error("Resend rejected the contact notify email", ref, res.status, errBody);
     await safeLedgerCall(() => markContactNotifyState(env, ref, "failed"), "markContactNotifyState", ref);
     return ok("Your message couldn't be sent right now — please WhatsApp us instead: +254 703 274 416.");
   }

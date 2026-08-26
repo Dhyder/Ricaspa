@@ -2663,3 +2663,18 @@ section,
 .starter-section {
   /* Add your styles here */
 }
+
+/*--------------------------------------------------------------
+# Honeypot field (bot deterrent on booking + contact forms)
+# Hidden via CSS (position off-screen), not display:none — some bots skip
+# display:none/visibility:hidden fields specifically, off-screen positioning
+# is a more reliable trap. Real users never see or reach it (tabindex="-1").
+--------------------------------------------------------------*/
+.hp-field {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  height: 0;
+  width: 0;
+  overflow: hidden;
+}

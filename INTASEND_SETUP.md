@@ -20,6 +20,7 @@ for two sessions before anyone noticed).
 | `VOUCHER_SIGNING_SECRET` | signed QR codes on vouchers | you choose it |
 | `BOOKING_NOTIFY_EMAIL` | which inbox `/api/book-session` requests land in | your real operational email |
 | `CONTACT_NOTIFY_EMAIL` | which inbox `/api/contact-message` submissions land in | your real operational email |
+| `TURNSTILE_SECRET_KEY` | bot check on both forms — degrades to honeypot-only (not blocked) if unset, but every real submission will be unprotected against scripted spam until it's set | Cloudflare dashboard → Turnstile → create a widget → copy the secret key. Also update `data-sitekey="YOUR_TURNSTILE_SITE_KEY"` in `index.html` (both the booking and contact forms) with that widget's **site key** (public, goes in the HTML directly — different from the secret key, which stays server-side only) |
 
 For the "you choose it" secrets: generate a long random string per
 variable (don't reuse one string across all of them) — e.g.
