@@ -1,30 +1,3 @@
-// POST /api/dashboard-login   body: { passphrase }
-// Same passphrase as the staff desks (STAFF_SECRET). On success, sets an
-// httpOnly session cookie the rest of /api/dashboard-*.js checks — the
-// dashboard SPA never sees or stores STAFF_SECRET itself.
-
 import { json } from "../_lib/voucherCore.js";
-import { createSessionCookie } from "../_lib/dashboardAuth.js";
-
-export async function onRequestPost(context) {
-  const { request, env } = context;
-
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "Invalid request" }, 400);
-  }
-
-  if (!env.STAFF_SECRET || body.passphrase !== env.STAFF_SECRET) {
-    return json({ error: "Wrong passphrase" }, 401);
-  }
-
-  const cookie = await createSessionCookie(env);
-  if (!cookie) return json({ error: "Server not configured" }, 500);
-
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { "Content-Type": "application/json", "Set-Cookie": cookie },
-  });
-}
+import { createSessionCookie,verifyPassword,audit } from "../_lib/dashboardAuth.js";
+export async function onRequestPost(c){const{request,env}=c;if(!env.DB)return json({error:"Dashboard user storage is not configured. Bind your D1 database as DB and apply migrations/0004_dashboard_users.sql."},503);let b;try{b=await request.json()}catch{return json({error:"Invalid request"},400)}const email=String(b.email||"").trim().toLowerCase(),password=String(b.password||"");if(!email||!password)return json({error:"Email and password are required"},400);const u=await env.DB.prepare("SELECT id,name,email,password_hash,role,status FROM dashboard_users WHERE email=?1").bind(email).first();if(!u||u.status!=="active"||!(await verifyPassword(password,u.password_hash)))return json({error:"Invalid email or password"},401);const cc=await createSessionCookie(env,u);if(!cc)return json({error:"Server not configured"},503);const now=new Date().toISOString();await env.DB.prepare("UPDATE dashboard_users SET last_login_at=?,updated_at=? WHERE id=?").bind(now,now,u.id).run();await audit(env,u,"login");return new Response(JSON.stringify({ok:true,user:{id:u.id,name:u.name,email:u.email,role:u.role}}),{headers:{"Content-Type":"application/json","Set-Cookie":cc}})}
