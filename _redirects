@@ -1,8 +1,6 @@
-# Keep dashboard auth pages outside the dashboard SPA fallback.
+# Auth entry pages. These are the only dashboard pages exposed without a session.
 /dashboard/login  /dashboard/login.html  200
 /dashboard/signup  /dashboard/signup.html  200
 
-# Only authenticated users should reach the dashboard SPA.
-# Authorization is enforced by the dashboard's API/session layer; this
-# fallback only resolves client-side routes after the app has loaded.
-/dashboard/*  /dashboard/index.html  200
+# Do NOT add a dashboard SPA fallback here. Pages middleware protects the
+# dashboard and serves the actual SPA only after authentication.
