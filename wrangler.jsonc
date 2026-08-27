@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ricaspa",
+  "compatibility_date": "2026-08-27",
+  "pages_build_output_dir": ".",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ricaspa-dashboard",
+      "database_id": "REPLACE_WITH_DASHBOARD_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
