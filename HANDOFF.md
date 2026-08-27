@@ -21,7 +21,7 @@ Updated: 2026-08-27
 
 ## Current dashboard
 - Production-facing `/dashboard` is the static Pages implementation under `dashboard/`.
-- `dashboard/index.html` loads `dashboard/app.js` and `dashboard/rica-dashboard.css`.
+- `dashboard/index.html` loads `dashboard/app.js`, `dashboard/rica-dashboard.css`, and `dashboard/enhancements.js` with cache-busting versions.
 - React/Vite exists under `dashboard-react/` as an isolated migration target, but is NOT the active `/dashboard` route yet.
 - Do not claim React is live until Pages build/routing is changed and verified.
 
@@ -29,16 +29,29 @@ Updated: 2026-08-27
 - `/api/dashboard-stats` exposes scalar compatibility fields: `totalBookings`, `pendingBookings`, `totalOrders`, `revenue`.
 - `/api/dashboard-bookings?upcoming=1` is the intended upcoming-bookings call.
 - `/api/dashboard-orders` returns ledger fields `ref`, `type`, `value`, `service_name`, `buyer_name`, `buyer_email`, `payment_state`, `finalization_state`, `voucher_code`, `created_at`, and `payment_completed_at`.
-- Active Orders page now uses the actual ledger field names, so customer name, service, amount, payment state and fulfilment state are displayed rather than blank status/customer cells.
-- `/api/dashboard-vouchers` is wired into the active dashboard and reads real `VOUCHERS` KV records server-side. It excludes `voucher-ref:*` helper keys and returns code/ref, buyerName/email/phone, recipient, service/type, value, status, created/expiry/redemption fields.
-- Active Vouchers page shows Reference, Customer, Service, Value, Status, Created, Expiry and Redeemed information.
+- Orders UI uses the actual ledger field names for customer, service, amount, payment and fulfilment.
+- `/api/dashboard-vouchers` reads real `VOUCHERS` KV records server-side and excludes `voucher-ref:*` helper keys.
+- Vouchers UI shows reference, customer, service, value, status, created, expiry and redemption information.
 - Never use mock voucher/order/booking data.
 
+## Table UX
+- `dashboard/enhancements.js` adds client-side lookup/search and 10-row pagination to rendered dashboard tables.
+- Search is intentionally generic and searches all visible row text; paging controls show the current range and total matches.
+- This is currently client-side because the existing dashboard endpoints return the complete bounded datasets. If datasets grow substantially, move filtering/pagination server-side with query parameters.
+
+## Voucher scanning
+- Vouchers page now has a `Scan voucher` action.
+- Scanner uses the browser camera through `getUserMedia` and `BarcodeDetector` when supported; it supports QR/barcode formats exposed by the browser.
+- Manual voucher reference/code lookup is provided as a fallback.
+- Lookup uses the authenticated voucher redemption endpoint; after confirmation, redemption POSTs to `/api/redeem-voucher` and refreshes the page.
+- Camera scanning requires HTTPS/secure context and browser camera permission. Unsupported browsers still get manual lookup.
+- Do not claim camera scanning is universally supported; BarcodeDetector availability varies by browser.
+
 ## Navigation and template-derived UI
-- Fixed a dead-end bug where the Administration navigation was not wired to the click handler; the sidebar now delegates all `data-section` buttons, including Staff & Users, Activity Log and Profile.
-- Added a template-inspired My Profile workspace and profile badge entry point.
-- Overview quick actions use the same navigation delegation rather than inline-only routing.
-- `render()` now awaits async page loaders and catches API failures, showing a retry panel instead of leaving a dead Loading state.
+- Administration navigation is wired through delegated `data-section` handling.
+- Added template-inspired profile workspace/profile badge.
+- Dashboard styling now uses Rica green/gold accents, warm neutral surfaces, serif display treatment for welcome areas, restrained borders, and template-style tables/forms.
+- Continue extracting useful patterns from the supplied template instead of creating unrelated UI.
 
 ## Staff & Users
 - Active dashboard Staff & Users page calls `GET /api/dashboard-users`, `POST /api/dashboard-users`, and `PATCH /api/dashboard-users`.
@@ -67,13 +80,14 @@ Updated: 2026-08-27
 5. Route `/dashboard` to built React output only after parity verification; keep static dashboard as fallback until then.
 
 ## Immediate functional priorities
-1. Deploy/verify the active dashboard order columns and status values.
-2. Verify Superuser Staff & Users create/status actions.
-3. Verify those actions appear in Activity Log with the actor.
-4. Add Profile and Customers using template components.
-5. Add Messages using real contact/booking data.
-6. Add booking/message linking.
-7. Design WhatsApp webhook integration after the internal message/customer model exists.
+1. Verify table search/pagination on real dashboard data.
+2. Verify voucher camera/manual lookup and redemption flow in HTTPS production.
+3. Verify Superuser Staff & Users create/status actions.
+4. Verify those actions appear in Activity Log with the actor.
+5. Add Profile and Customers using template components.
+6. Add Messages using real contact/booking data.
+7. Add booking/message linking.
+8. Design WhatsApp webhook integration after the internal message/customer model exists.
 
 ## Verification
 - Sign-in and first-Superuser setup work in production.
@@ -81,6 +95,7 @@ Updated: 2026-08-27
 - Real upcoming bookings/orders render.
 - Orders show customer, amount, payment state and fulfilment state.
 - Vouchers show customer/value/status from KV.
+- Vouchers can be looked up manually and scanned where BarcodeDetector is supported.
 - Superuser can create/manage staff.
 - Staff/user changes appear in Activity Log.
 - React build succeeds before production routing changes.
