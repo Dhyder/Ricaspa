@@ -5,7 +5,7 @@ const id = () => crypto.randomUUID();
 
 export async function onRequestPost(context) {
   const { request, env } = context;
-  if (!env.DB) return json({ error: "Dashboard user storage is not configured" }, 503);
+  if (!env.DB) return json({ error: "Dashboard user storage is not configured. Bind your D1 database as DB and apply migrations/0004_dashboard_users.sql." }, 503);
   let body;
   try { body = await request.json(); } catch { return json({ error: "Invalid request" }, 400); }
 
@@ -18,9 +18,11 @@ export async function onRequestPost(context) {
     return json({ error: "Name, valid email and an 8+ character password are required" }, 400);
   }
 
-  // Superuser creation is deliberately protected. A public signup form must
-  // never allow an anonymous visitor to grant themselves full administration.
-  if (role === "superuser" && body.setupKey !== env.STAFF_SECRET) return json({ error: "Superuser signup requires the setup key" }, 403);
+  const setupKey = env.SUPERUSER_SETUP_KEY;
+  if (role === "superuser") {
+    if (!setupKey) return json({ error: "Superuser setup is not configured. Add SUPERUSER_SETUP_KEY to this deployment." }, 503);
+    if (body.setupKey !== setupKey) return json({ error: "Invalid superuser setup key" }, 403);
+  }
 
   const exists = await env.DB.prepare("SELECT id FROM dashboard_users WHERE email = ?1").bind(email).first();
   if (exists) return json({ error: "An account with that email already exists" }, 409);
