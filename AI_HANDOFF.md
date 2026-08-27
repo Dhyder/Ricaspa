@@ -883,3 +883,53 @@ interpolations in both files.
    isn't enough, each tracked action (booking submitted, contact
    submitted, voucher purchased) needs its own conversion label from
    there. Not started yet.
+
+## 2026-08-25, later same day — Chatway fully scoped off vouchers.html + first conversion event wired
+
+**Site owner clarification:** Chatway shouldn't appear on `vouchers.html`
+either, not just the staff pages. Removed the `<script id="chatway">` tag
+from `vouchers.html` — Chatway is now on `index.html` only, confirmed by
+grep across every `.html` file.
+
+**Google Ads conversion tracking — first one wired.** Site owner provided
+the "Book appointment" conversion action's label
+(`AW-16973029826/LKJ1CPj9_s0cEMLDr50_`) via Google Ads' own setup
+instructions, which assume a dedicated "thank you" page to drop the event
+snippet on. This site doesn't have one — `validate.js` shows an inline
+success message via AJAX rather than navigating anywhere, so the literal
+instructions didn't map directly.
+
+**How it's actually wired:**
+- `assets/vendor/php-email-form/validate.js` — one addition, at the exact
+  point it already flips to the success state (`data.trim() == 'OK'`):
+  dispatches a `rica:form-success` custom event (bubbles, carries the
+  form's `action` in `event.detail`). Everything else about the file is
+  unchanged — same vendor library, same behavior, just observable now.
+- `assets/js/ads-conversions.js` (new) — listens for that event, matches
+  on `action === '/api/book-session'`, fires the exact `gtag('event',
+  'conversion', ...)` call the site owner supplied. Guards against `gtag`
+  not existing (ad blockers, etc.) rather than throwing.
+- Loaded in `index.html` right after `validate.js`.
+
+**Still waiting on the site owner for:**
+- A conversion label for `/api/contact-message` (contact form) — same
+  pattern, just needs `if (action === '/api/contact-message') { ... }`
+  added to `ads-conversions.js` once it exists.
+- A conversion label for voucher purchases — this one's structurally
+  different, since vouchers.html/voucher.js's checkout flow doesn't go
+  through validate.js at all (IntaSend payment + polling
+  `/api/order-status`, not a simple form POST). That'll need its own
+  `gtag()` call placed at whatever point voucher.js currently confirms
+  `status === 'completed'`, not a `rica:form-success` listener.
+
+**Test status:** still 104/104 (`webhook-lifecycle.test.mjs` 51 +
+`booking-contact.test.mjs` 53) — this was frontend-only, confirmed via
+syntax-checking `validate.js`/`ads-conversions.js` and re-running both
+suites to rule out any accidental backend regression.
+
+**NEXT ACTION:** site owner tests a real booking submission on the live
+site with Google Ads' tag assistant / Chrome DevTools network tab open,
+confirms the conversion fires exactly once per real submission (not on
+page load, not on a failed submission). Then, whenever ready, provide the
+contact-form and voucher-purchase conversion labels to finish the other
+two.

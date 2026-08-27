@@ -67,6 +67,12 @@
       if (data.trim() == 'OK') {
         thisForm.querySelector('.sent-message').classList.add('d-block');
         thisForm.reset(); 
+        // Custom event, not part of the original PHP Email Form library —
+        // lets other scripts (e.g. assets/js/ads-conversions.js) react to a
+        // real successful submission without touching this vendor file's
+        // actual logic. Fires only on the real "OK" success path, same
+        // condition validate.js itself uses.
+        thisForm.dispatchEvent(new CustomEvent('rica:form-success', { bubbles: true, detail: { action } }));
       } else {
         throw new Error(data ? data : 'Form submission failed and no error message returned from: ' + action); 
       }

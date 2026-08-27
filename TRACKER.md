@@ -159,12 +159,15 @@
       more than a technical one, worth deciding deliberately rather than
       bundling into a bot-fix pass.
 
-- [ ] **Google Ads conversion event tracking — waiting on the site owner.**
-      Base `gtag.js` (`AW-16973029826`) is on `index.html`/`vouchers.html`,
-      pageview-only. Wiring booking/contact/voucher-purchase submissions as
-      tracked conversions needs the actual conversion action label(s) from
-      Google Ads (Tools & Settings → Conversions) — can't build this
-      without it. See `AI_HANDOFF.md`'s 2026-08-25 entry.
+- [x] **Google Ads conversion — booking form wired**, 2026-08-25
+      (`assets/js/ads-conversions.js`, fires on the `rica:form-success`
+      event `validate.js` now dispatches on real success).
+- [ ] **Google Ads conversion — contact form + voucher purchase still
+      need conversion labels from the site owner** (Google Ads → Tools &
+      Settings → Conversions) before they can be wired. Voucher purchase
+      is structurally different — doesn't go through `validate.js`, needs
+      its own `gtag()` call in `voucher.js` at the payment-confirmed point,
+      not the same event listener as the other two forms.
 
 ## ✅ Done
 
@@ -178,6 +181,9 @@
       deliberately until the live payment flow is proven end-to-end (see
       🔴 above) — reachable by anyone browsing the site, just not yet
       surfaced by search engines.
+- [x] Chatway confirmed scoped to `index.html` only — removed from
+      `vouchers.html` 2026-08-25, was never on the staff pages or
+      `services.html` to begin with.
 - [x] Full security/reliability hardening pass (see above)
 - [x] D1 transaction ledger + real database provisioned
 - [x] Signed QR codes + staff camera scanner
