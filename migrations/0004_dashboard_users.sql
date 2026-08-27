@@ -1,16 +1,10 @@
--- Dashboard user storage
--- Keeps dashboard identities in D1 so the dashboard can authenticate and
--- persist users independently of the voucher KV store.
-
-CREATE TABLE IF NOT EXISTS dashboard_users (
-  id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'staff',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_login_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_dashboard_users_email
-  ON dashboard_users(email);
+CREATE TABLE IF NOT EXISTS dashboard_users (id TEXT PRIMARY KEY,name TEXT NOT NULL,email TEXT NOT NULL UNIQUE COLLATE NOCASE,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK (role IN ('superuser','employee')),status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','pending','disabled')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,last_login_at TEXT);
+CREATE TABLE IF NOT EXISTS dashboard_sessions (id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES dashboard_users(id) ON DELETE CASCADE,expires_at TEXT NOT NULL,created_at TEXT NOT NULL,last_seen_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS dashboard_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT REFERENCES dashboard_users(id) ON DELETE SET NULL,action TEXT NOT NULL,entity_type TEXT,entity_id TEXT,metadata TEXT,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_dashboard_users_email ON dashboard_users(email);
+CREATE INDEX IF NOT EXISTS idx_dashboard_users_role ON dashboard_users(role);
+CREATE INDEX IF NOT EXISTS idx_dashboard_users_status ON dashboard_users(status);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_user ON dashboard_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_dashboard_sessions_expires ON dashboard_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_dashboard_audit_created ON dashboard_audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_dashboard_audit_user ON dashboard_audit_log(user_id);
