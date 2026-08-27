@@ -25,6 +25,20 @@
         textEl.textContent = data.emailWarning
           ? 'Payment confirmed and your voucher was created, but the email may not have sent. Contact us with your reference if it does not arrive shortly.'
           : 'Payment confirmed. Your voucher has been emailed — check your inbox.';
+
+        // Fire the Ads conversion once per ref (guards against re-firing on
+        // page refresh, since this success page is reachable again via the
+        // same ?ref= URL).
+        const firedKey = 'rica:voucher-conversion-fired:' + ref;
+        if (typeof gtag === 'function' && !sessionStorage.getItem(firedKey)) {
+          gtag('event', 'conversion', {
+            'send_to': 'AW-16973029826/DsrWCL3e1OgcEMLDr50_',
+            'value': 1.0,
+            'currency': 'USD',
+            'transaction_id': ref,
+          });
+          sessionStorage.setItem(firedKey, '1');
+        }
         return;
       }
       if (data.status === 'failed') {

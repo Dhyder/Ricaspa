@@ -16,7 +16,7 @@ document.addEventListener('rica:form-success', function (event) {
 
   if (action === '/api/book-session') {
     gtag('event', 'conversion', {
-      'send_to': 'AW-16973029826/LKJ1CPj9_s0cEMLDr50_',
+      'send_to': 'AW-16973029826/R1P-CLaU3ugcEMLDr50_',
       'value': 1.0,
       'currency': 'USD',
     });
