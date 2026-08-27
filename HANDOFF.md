@@ -6,41 +6,62 @@ Updated: 2026-08-27
 - `mignon`
 
 ## Current state
-- Cloudflare Pages Functions now compile past the missing `isAuthenticated` export.
+- Cloudflare Pages Functions compile and dashboard authentication is working in production.
 - `functions/_lib/dashboardAuth.js` exports session/auth helpers including `isAuthenticated`, `requireSession`, `requireRole`, password hashing/verification, sessions, and audit logging.
+- PBKDF2 was reduced to Cloudflare Workers' supported 100,000 iteration limit.
 - `functions/api/dashboard-setup.js` implements one-time first-Superuser creation using `SUPERUSER_SETUP_KEY` and D1 `DB`.
 - `functions/api/dashboard-login.js` authenticates dashboard users against D1 and creates an HTTP-only session.
-- `migrations/0004_dashboard_users.sql` is required for dashboard users/sessions/audit tables.
-- `mignon` contains the real D1/KV production configuration supplied by the owner: DB=`ricaspa-ledger`, D1 UUID=`cdf2839a-2f0f-4705-a327-563da5d2cb31`, KV=`VOUCHERS`, ID=`20e21678c21f48718b235646ff753777`.
-- The first deployment after this configuration successfully compiled and published assets, then failed only when publishing the Function because an earlier placeholder D1 UUID was committed; that placeholder was replaced with the real configuration.
+- Production D1 is `ricaspa-ledger`, UUID `cdf2839a-2f0f-4705-a327-563da5d2cb31`; KV `VOUCHERS`, ID `20e21678c21f48718b235646ff753777`.
+- Production migration history records `0004_dashboard_users.sql` as applied, but initially only `dashboard_users` existed. Repair migration `0005_dashboard_schema_repair.sql` was added to create missing `dashboard_sessions` and `dashboard_audit_log` without resetting existing data.
+- The user confirmed dashboard sign-in now works.
 
-## Known current blocker
-The user reports `/dashboard/setup.html` returns `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` when creating the first Superuser. The setup page calls `POST /api/dashboard-setup` and expects JSON. The function itself returns JSON, so the next AI should verify the deployed Pages routing/function mapping and whether `/api/dashboard-setup` is being served by the Function or falling through to an HTML asset. Do not assume this is a database error.
+## UI source of truth
+- The user uploaded `shadcn-admin-1.0.0.zip` and explicitly identified it as the original template.
+- The original auth design to reproduce is the Shadcn `SignIn2` / SignUp experience: split two-column page, centered form, logo/brand header, restrained typography, muted helper text, and visual panel on the right.
+- The uploaded template contains `src/features/auth/sign-in/sign-in-2.tsx`, `src/features/auth/sign-up/index.tsx`, and related auth components.
+- Do NOT invent another dashboard/auth visual system. Preserve the original template structure and interaction feel, replacing branding/content with Rica assets and operational language.
+- `dashboard/login.html` and `dashboard/setup.html` were restyled to follow the SignIn2/SignUp2 pattern while retaining the real JSON auth/setup endpoints.
+- The user specifically wants initial Superuser signup/setup to use the SignUp2 styling, consistent with login.
 
-## UI requirement
-The user explicitly says the existing dashboard had its own styling and does NOT want it stripped out or replaced by generic styling. Preserve the existing dashboard design system and customize it to Rica. Auth pages currently have styling, but the user says they still look horrible; give login and first-Superuser setup a polished Rica treatment while retaining the dashboard's visual language. Do not remove the Superuser setup/sign-up flow.
-
-## Product direction
+## Dashboard product direction
 - Dashboard replaces the old `staff-vouchers` / `staff-bookings` operational interfaces.
-- Individual authenticated accounts: `superuser` and `staff`.
-- Actions such as booking approvals/status changes and voucher redemption must be attributable to the logged-in user and written to the audit log.
+- Individual authenticated accounts: `superuser` and staff/employee.
 - Superusers manage staff/users and can see who approved/redeemed actions.
+- Booking status changes and voucher redemption must be attributable to the logged-in user and written to the audit log.
 - Avoid using a shared `X-Staff-Secret` as the dashboard's primary authentication mechanism.
+
+## Data integration blocker / next work
+- The user reported that the dashboard shows no booking/pending data even when logged in.
+- Root cause found: `/api/dashboard-stats` returned nested `orders` and `bookings` summaries while the dashboard expected scalar values. Compatibility fields were added: `totalBookings`, `pendingBookings`, `totalOrders`, and `revenue`.
+- `/api/dashboard-bookings` previously required either `date` or `upcoming=1`, while the dashboard called it without a parameter. It was changed to return upcoming bookings by default.
+- The real booking schema uses the `bookings` table with `ref`, `name`, `email`, `phone`, `service`, `preferred_date`, `preferred_time`, `message`, `status`, notification states, and timestamps. Valid booking statuses are `new`, `confirmed`, `declined`, `completed`, `no-show`.
+- These data fixes need production deployment and verification against real records. Do not substitute mock data.
+- Verify orders/revenue mapping against the actual `ledger.js` response before declaring the data layer complete.
+
+## Dashboard UI recovery status
+- The user explicitly rejected the recently generated dashboard as NOT being the original template.
+- The uploaded `shadcn-admin-1.0.0.zip` is now the authoritative UI reference. The repo's `admin-shadcn-integration` branch is not sufficient as the source of truth.
+- `mignon` remains a static Cloudflare Pages implementation, so the Shadcn design must be reproduced in the static dashboard rather than switching the whole site to a React build.
+- Preserve the working auth/session/data architecture while replacing presentation with the supplied template's actual visual structure.
 
 ## Deployment notes
 - Do not commit real local secret values such as `SUPERUSER_SETUP_KEY`.
-- The repository's historical `.gitignore` ignored Wrangler config files, which caused Cloudflare deployments to miss local configuration. Keep a safe committed Wrangler config with the real non-secret D1/KV IDs.
-- There was also a bad redirect rule `/dashboard/* /dashboard/index.html 200` reported by Cloudflare as an infinite loop. It should be removed/fixed after the setup endpoint is verified.
+- Keep the safe committed Wrangler config with the real non-secret D1/KV IDs so Pages can bind production resources.
+- Cloudflare previously reported `/dashboard/* /dashboard/index.html 200` as an infinite-loop redirect rule. Remove/fix that rule if it remains.
 
 ## Verification sequence
 1. Deploy current `mignon`.
-2. Open `/api/dashboard-setup` directly and confirm it returns JSON (not the dashboard HTML).
-3. Open `/dashboard/setup.html` and create the first Superuser using the configured Cloudflare `SUPERUSER_SETUP_KEY`.
-4. Login at `/dashboard/login.html`.
-5. Verify Superuser can create Staff.
-6. Verify booking approval and voucher redemption record the correct user in audit/history.
-7. Verify dashboard UI and auth pages are responsive and visually consistent with Rica.
-8. Reconcile `mignon` with `admin-shadcn-integration` only after the working state is verified; do not force-push over newer work.
+2. Confirm `/api/dashboard-setup` returns JSON.
+3. Confirm `/dashboard/login.html` uses the supplied SignIn2-style Rica presentation.
+4. Confirm `/dashboard/setup.html` uses the supplied SignUp2-style Rica presentation.
+5. Confirm Superuser login/session works.
+6. Confirm dashboard overview pulls real booking/order counts.
+7. Confirm Bookings loads real upcoming records and pending/new statuses.
+8. Confirm booking approval/status change records the logged-in user.
+9. Confirm voucher redemption records the logged-in user.
+10. Confirm Superuser can create Staff accounts and see the user list.
+11. Confirm Activity Log shows who performed actions.
+12. Verify the production build before calling the UI/data work complete.
 
 ## Important honesty rule
 Do not tell the user a change is complete unless the repository write succeeded and, where applicable, the deployment/build result confirms it.
