@@ -28,6 +28,9 @@
       `TURNSTILE_SECRET_KEY` is set in Cloudflare Production env vars —
       the site key alone doesn't verify anything server-side, both halves
       are required (see `AI_HANDOFF.md`'s bot-protection entry).
+- [ ] **New `STAFF_SECRET` issued 2026-08-25** — set it in Cloudflare
+      Production, redeploy, retest both staff pages. This replaces
+      whatever value (if any) was set from the earlier passphrase.
 - [ ] **Verify the booking and contact forms against the real deployment,
       not just the mock test suite.** `test/booking-contact.test.mjs`
       passes locally (34/34), but that only proves the code logic — submit
@@ -103,6 +106,22 @@
       passphrase as the voucher desk), Today/Upcoming/date views of booking
       requests with one-tap status updates (confirmed/declined/completed/
       no-show). Doesn't hard-block double-booking (see 🟡 below for why).
+- [x] **Fixed a stored XSS in `staff-vouchers.html`** — voucher fields
+      (`toName` etc., attacker-controlled via the public purchase form)
+      were interpolated into `innerHTML` unescaped. Added the same
+      `escapeHtml()` pattern `staff-bookings.html` already had.
+- [x] **`book-session.js` now validates `date`/`time` format server-side**
+      (was presence-only, relying on the HTML `<input>` type constraints
+      which a direct POST can bypass) — both the source of the earlier XSS
+      class of bug and now closed at both the input and display ends.
+- [x] **Staff passphrase gate now actually verifies on unlock** —
+      previously showed the desk/tracker UI for ANY non-empty input and
+      only failed on the first real API call. New
+      `functions/api/staff-auth.js` checks immediately; both pages also
+      handle a mid-session 401 (passphrase rotated while logged in) by
+      re-prompting instead of erroring silently. Added `sessionStorage`
+      (not `localStorage`) persistence so a shared front-desk device isn't
+      retyping the passphrase every page refresh.
 - [ ] Error responses still sometimes echo raw internal error strings —
       fine while debugging, worth trimming before real customers can
       trigger and see them
@@ -140,6 +159,13 @@
       more than a technical one, worth deciding deliberately rather than
       bundling into a bot-fix pass.
 
+- [ ] **Google Ads conversion event tracking — waiting on the site owner.**
+      Base `gtag.js` (`AW-16973029826`) is on `index.html`/`vouchers.html`,
+      pageview-only. Wiring booking/contact/voucher-purchase submissions as
+      tracked conversions needs the actual conversion action label(s) from
+      Google Ads (Tools & Settings → Conversions) — can't build this
+      without it. See `AI_HANDOFF.md`'s 2026-08-25 entry.
+
 ## ✅ Done
 
 - [x] Voucher purchase form (cash amount / specific service / self-gift / gift-someone-else)
@@ -147,7 +173,11 @@
 - [x] Voucher email + separate buyer confirmation email for gifts, with QR code
 - [x] Moved off Pesapal (not licensed in Kenya) to IntaSend (CBK-licensed)
 - [x] Worked around IntaSend's Cloudflare Workers IP block via client-side SDK checkout
-- [x] Clean `/vouchers` URL, page unlinked from nav + noindex while in progress
+- [x] Clean `/vouchers` URL, linked from the main nav ("Gift Vouchers",
+      between Packages and Contact) as of 2026-08-25. `noindex` left ON
+      deliberately until the live payment flow is proven end-to-end (see
+      🔴 above) — reachable by anyone browsing the site, just not yet
+      surfaced by search engines.
 - [x] Full security/reliability hardening pass (see above)
 - [x] D1 transaction ledger + real database provisioned
 - [x] Signed QR codes + staff camera scanner

@@ -43,8 +43,9 @@
 <div id="gate">
   <h1>Staff access</h1>
   <p class="sub">Enter the voucher desk passphrase — same one as the redemption page.</p>
-  <input id="secretInput" type="password" placeholder="Passphrase">
+  <input id="secretInput" type="password" placeholder="Passphrase" onkeydown="if(event.key==='Enter')unlock()">
   <button class="btn-unlock" onclick="unlock()">Unlock</button>
+  <div id="gateError" style="display:none;color:#e07a7a;font-size:13px;margin-top:6px;"></div>
 </div>
 
 <div id="tracker" style="display:none;">
@@ -69,14 +70,39 @@
   let currentView = 'today';
 
   function unlock() {
-    staffSecret = document.getElementById('secretInput').value;
-    if (!staffSecret) return;
-    document.getElementById('gate').style.display = 'none';
-    document.getElementById('tracker').style.display = '';
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('dateInput').value = today;
-    setView('today');
+    const input = document.getElementById('secretInput').value;
+    if (!input) return;
+    verifyAndEnter(input);
   }
+
+  async function verifyAndEnter(secret) {
+    const gateError = document.getElementById('gateError');
+    gateError.style.display = 'none';
+    try {
+      const res = await fetch('/api/staff-auth', { headers: { 'X-Staff-Secret': secret } });
+      if (!res.ok) {
+        sessionStorage.removeItem('ricaspa_staff_secret');
+        gateError.textContent = 'Wrong passphrase.';
+        gateError.style.display = 'block';
+        return;
+      }
+      staffSecret = secret;
+      sessionStorage.setItem('ricaspa_staff_secret', secret);
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('tracker').style.display = '';
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('dateInput').value = today;
+      setView('today');
+    } catch {
+      gateError.textContent = 'Network error, please try again.';
+      gateError.style.display = 'block';
+    }
+  }
+
+  (function tryAutoUnlock() {
+    const saved = sessionStorage.getItem('ricaspa_staff_secret');
+    if (saved) verifyAndEnter(saved);
+  })();
 
   function setView(view) {
     currentView = view;
@@ -103,6 +129,15 @@
 
     try {
       const res = await fetch(url, { headers: { 'X-Staff-Secret': staffSecret } });
+      if (res.status === 401) {
+        sessionStorage.removeItem('ricaspa_staff_secret');
+        document.getElementById('tracker').style.display = 'none';
+        document.getElementById('gate').style.display = '';
+        document.getElementById('gateError').textContent = 'Session expired or passphrase changed — please re-enter it.';
+        document.getElementById('gateError').style.display = 'block';
+        document.getElementById('loading').style.display = 'none';
+        return;
+      }
       const data = await res.json();
       document.getElementById('loading').style.display = 'none';
 
@@ -129,7 +164,7 @@
     document.getElementById('list').innerHTML = bookings.map(b => `
       <div class="card">
         <div class="card-top">
-          <span class="time">${showDate ? (b.preferred_date + ' · ') : ''}${b.preferred_time || '—'}</span>
+          <span class="time">${showDate ? (escapeHtml(b.preferred_date) + ' · ') : ''}${escapeHtml(b.preferred_time || '—')}</span>
           <span class="status status-${b.status}">${b.status}</span>
         </div>
         <div class="name">${escapeHtml(b.name)}</div>

@@ -125,6 +125,15 @@ export async function onRequestPost(context) {
   if (!isValidEmail(email)) {
     return ok("That email address doesn't look right — please check it and try again.");
   }
+  // The <input type="date">/<input type="time"> constraints in index.html
+  // only apply in a real browser — a direct POST (bot, curl, or a modified
+  // client) can send anything as `date`/`time`. Both fields get rendered
+  // in the staff slot tracker, so enforce the format server-side rather
+  // than trusting the client, even though the tracker also escapes on
+  // display (defense in depth, not either/or).
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+    return ok("Date/time format wasn't recognized — please use the date and time pickers and try again.");
+  }
 
   const ref = generateBookingRef();
 

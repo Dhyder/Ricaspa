@@ -32,8 +32,9 @@
 <div id="gate">
   <h1>Staff access</h1>
   <p class="sub">Enter the voucher desk passphrase.</p>
-  <input id="secretInput" type="password" placeholder="Passphrase">
+  <input id="secretInput" type="password" placeholder="Passphrase" onkeydown="if(event.key==='Enter')unlock()">
   <button class="btn-lookup" onclick="unlock()">Unlock</button>
+  <div id="gateError" style="display:none;color:#e07a7a;font-size:13px;margin-top:6px;"></div>
 </div>
 
 <div id="desk" style="display:none;">
@@ -120,11 +121,39 @@
   }
 
   function unlock() {
-    staffSecret = document.getElementById('secretInput').value;
-    if (!staffSecret) return;
-    document.getElementById('gate').style.display = 'none';
-    document.getElementById('desk').style.display = '';
+    const input = document.getElementById('secretInput').value;
+    if (!input) return;
+    verifyAndEnter(input);
   }
+
+  async function verifyAndEnter(secret) {
+    const gateError = document.getElementById('gateError');
+    gateError.style.display = 'none';
+    try {
+      const res = await fetch('/api/staff-auth', { headers: { 'X-Staff-Secret': secret } });
+      if (!res.ok) {
+        sessionStorage.removeItem('ricaspa_staff_secret');
+        gateError.textContent = 'Wrong passphrase.';
+        gateError.style.display = 'block';
+        return;
+      }
+      staffSecret = secret;
+      sessionStorage.setItem('ricaspa_staff_secret', secret);
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('desk').style.display = '';
+    } catch {
+      gateError.textContent = 'Network error, please try again.';
+      gateError.style.display = 'block';
+    }
+  }
+
+  // Same-tab session persistence — a shared front-desk device shouldn't
+  // need the passphrase retyped every page refresh during a shift.
+  // sessionStorage clears when the tab closes, unlike localStorage.
+  (function tryAutoUnlock() {
+    const saved = sessionStorage.getItem('ricaspa_staff_secret');
+    if (saved) verifyAndEnter(saved);
+  })();
 
   function showResult(data, isError) {
     const el = document.getElementById('result');
@@ -132,7 +161,7 @@
     el.className = isError ? 'error' : 'ok';
 
     if (isError) {
-      el.innerHTML = `<div>${data.error || 'Something went wrong.'}</div>`;
+      el.innerHTML = `<div>${escapeHtml(data.error || 'Something went wrong.')}</div>`;
       document.getElementById('redeemBtn').disabled = true;
       return;
     }
@@ -141,13 +170,19 @@
     const valueText = v.type === 'amount' ? `KES ${Number(v.value).toLocaleString()}` : (v.serviceName || v.value);
     el.innerHTML = `
       ${scannedSignature ? `<div class="row"><span>QR signature</span><b style="color:#6fbf73;">✓ verified</b></div>` : ''}
-      <div class="row"><span>Status</span><b>${v.status.toUpperCase()}</b></div>
-      <div class="row"><span>Value</span><b>${valueText}</b></div>
-      <div class="row"><span>To</span><span>${v.toName}</span></div>
-      <div class="row"><span>Expires</span><span>${new Date(v.expiresAt).toLocaleDateString()}</span></div>
-      ${v.redeemedAt ? `<div class="row"><span>Redeemed</span><span>${new Date(v.redeemedAt).toLocaleString()}</span></div>` : ''}
+      <div class="row"><span>Status</span><b>${escapeHtml(v.status.toUpperCase())}</b></div>
+      <div class="row"><span>Value</span><b>${escapeHtml(String(valueText))}</b></div>
+      <div class="row"><span>To</span><span>${escapeHtml(v.toName)}</span></div>
+      <div class="row"><span>Expires</span><span>${escapeHtml(new Date(v.expiresAt).toLocaleDateString())}</span></div>
+      ${v.redeemedAt ? `<div class="row"><span>Redeemed</span><span>${escapeHtml(new Date(v.redeemedAt).toLocaleString())}</span></div>` : ''}
     `;
     document.getElementById('redeemBtn').disabled = v.status === 'redeemed';
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
   }
 
   async function callApi(action) {
@@ -159,6 +194,14 @@
         headers: { 'Content-Type': 'application/json', 'X-Staff-Secret': staffSecret },
         body: JSON.stringify({ code, action, signature: scannedSignature || undefined }),
       });
+      if (res.status === 401) {
+        sessionStorage.removeItem('ricaspa_staff_secret');
+        document.getElementById('desk').style.display = 'none';
+        document.getElementById('gate').style.display = '';
+        document.getElementById('gateError').textContent = 'Session expired or passphrase changed — please re-enter it.';
+        document.getElementById('gateError').style.display = 'block';
+        return;
+      }
       const data = await res.json();
       showResult(data, !res.ok);
     } catch {

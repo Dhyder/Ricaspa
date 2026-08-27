@@ -789,3 +789,97 @@ token-rejected, and secret-not-configured paths) — 98/98 passing.
 ready but non-functional as a bot check until the real site key is in
 place), then submit a real booking and contact message live to confirm
 neither gets silently eaten.
+
+## 2026-08-25 — vouchers going live on the main site: staff-tool hardening pass
+
+**Site owner request:** "make vouchers available in our main page, fail-
+proof this bit by bit" — plus, bundled in: review/finalize the two staff
+tools, rotate the login passphrase, keep Chatway off the internal pages,
+and (queued for next) wire form submissions to Google Ads conversion
+tracking.
+
+**Investigation before touching anything:**
+- Chatway widget: confirmed present only on `index.html` and
+  `vouchers.html` — NOT on `staff-vouchers.html`, `staff-bookings.html`,
+  or `services.html`. Already correctly scoped; noting it here so it stays
+  that way — **don't copy the Chatway `<script>` tag onto the staff pages
+  when editing them.**
+- Google Ads gtag.js (`AW-16973029826`) present on `index.html` and
+  `vouchers.html`, base pageview tag only — no conversion events fired
+  yet. Queued as the next piece, pending conversion label info only the
+  site owner has (see below).
+
+**New passphrase issued** (`STAFF_SECRET`) — the site owner confirmed the
+one generated a session earlier was never actually confirmed as applied,
+so a fresh one was issued to remove ambiguity about which value is live.
+Gates both staff pages identically, nothing else needed to rotate it going
+forward (just update the env var + redeploy).
+
+**Real bugs found and fixed during the staff-tool review, not just a
+rubber-stamp:**
+
+1. **Stored XSS in `staff-vouchers.html`.** `showResult()` interpolated
+   `v.toName` (and other voucher-record fields) directly into `innerHTML`
+   with no escaping. `toName` comes straight from the public voucher
+   purchase form — any customer could type `<img src=x onerror=...>` as a
+   gift recipient's name, and it would execute inside a staff member's
+   authenticated session the moment they looked up that code.
+   `staff-bookings.html` already had an `escapeHtml()` helper for exactly
+   this reason; `staff-vouchers.html` didn't. Added the same helper, wrapped
+   every interpolated field.
+2. **`book-session.js` never validated `date`/`time` format server-side** —
+   only checked they were non-empty. The `<input type="date">`/
+   `type="time"` HTML constraints only apply in a real browser; a direct
+   POST could send anything, including markup, which would then render
+   unescaped-adjacent in the slot tracker (the two fields specifically
+   weren't wrapped in `escapeHtml()` there either — fixed both ends:
+   server now validates `/^\d{4}-\d{2}-\d{2}$/` / `/^\d{2}:\d{2}$/` and
+   rejects anything else, AND the tracker now escapes them anyway —
+   defense in depth, not either/or).
+3. **The passphrase gate on both staff pages was cosmetic, not real.**
+   `unlock()` just checked the input was non-empty and showed the desk UI
+   — the actual check only happened later, on the first API call. A wrong
+   passphrase let someone see the whole desk/tracker interface with no
+   error until they tried to do something. Added `functions/api/staff-auth.js`
+   (GET, checks `X-Staff-Secret`, returns 200/401, nothing else) — both
+   pages now verify immediately on unlock and show "Wrong passphrase"
+   right away if it fails.
+4. **Added same-tab session persistence** (`sessionStorage`, not
+   `localStorage` — clears when the tab closes) so a shared front-desk
+   device doesn't need the passphrase retyped on every page refresh during
+   a shift. Both pages auto-attempt unlock on load if a secret is saved,
+   and both now handle a 401 mid-session (e.g. passphrase rotated while
+   someone's logged in) by clearing the saved secret and showing the gate
+   again with an explanatory message, instead of just erroring silently.
+
+**Main site changes:**
+- `index.html` nav: added "Gift Vouchers" → `/vouchers.html`, between
+  Packages and Contact.
+- `vouchers.html`'s `noindex, nofollow` **deliberately left in place** —
+  reachable via the nav now, but not yet opened up to search engines,
+  because the end-to-end payment flow still hasn't been proven with a real
+  transaction (still open in `TRACKER.md`'s 🔴 Critical section). Flip
+  this to indexed once that's confirmed, not before — reversing search
+  engine indexing after the fact is much slower than doing it in the right
+  order.
+
+**Test status:** `test/webhook-lifecycle.test.mjs` (51) +
+`test/booking-contact.test.mjs` (53, up from 47 — added date/time
+validation regression test + `staff-auth.js` coverage) — 104/104 passing.
+The XSS fix itself isn't covered by an automated test (front-end template
+escaping in static HTML, no DOM test harness in this repo) — verified by
+direct code review instead: confirmed which fields were vulnerable,
+confirmed the fix covers all of them, grepped for any remaining unescaped
+interpolations in both files.
+
+**NEXT ACTION — two separate threads:**
+1. Site owner sets the new `STAFF_SECRET` in Cloudflare Production,
+   redeploys, and re-tests both staff pages (confirm the immediate
+   wrong-passphrase error works, confirm session persistence works,
+   confirm a legitimate voucher lookup still renders correctly).
+2. Google Ads conversion event wiring — needs the site owner's actual
+   conversion action label(s) from the Google Ads dashboard (Tools & Settings
+   → Conversions) before any code can be written; `AW-16973029826` alone
+   isn't enough, each tracked action (booking submitted, contact
+   submitted, voucher purchased) needs its own conversion label from
+   there. Not started yet.

@@ -9,6 +9,7 @@ import { onRequestPost as bookSession } from "../functions/api/book-session.js";
 import { onRequestPost as contactMessage } from "../functions/api/contact-message.js";
 import { onRequestGet as bookingsList } from "../functions/api/bookings-list.js";
 import { onRequestPost as updateBookingStatus } from "../functions/api/update-booking-status.js";
+import { onRequestGet as staffAuth } from "../functions/api/staff-auth.js";
 import { createMockKV } from "./mocks/kv.mjs";
 import { createMockD1 } from "./mocks/d1.mjs";
 import { installMockResend } from "./mocks/resend.mjs";
@@ -99,6 +100,37 @@ async function scenarioBookingBadEmail(env) {
   });
   const body = await res.text();
   assert(body.trim() !== "OK", "rejects an invalid email address");
+}
+
+// Regression test: date/time only had client-side <input type="date/time">
+// enforcement — a direct POST could send anything (including markup, since
+// these values get rendered in the staff tracker). Also covers the exact
+// injection shape that would matter if the tracker's escaping ever
+// regressed: a script-like string as `date`.
+async function scenarioBookingBadDateTime(env) {
+  section("3b. Booking — malformed / injected date and time are rejected server-side");
+  const badDate = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "Test", email: "test@example.com", phone: "254700000000",
+      date: "<img src=x onerror=alert(1)>", time: "10:00",
+    }, { "cf-connecting-ip": "10.1.0.7" }),
+    env,
+  });
+  const badDateBody = await badDate.text();
+  assert(badDateBody.trim() !== "OK", "a non-date-shaped `date` value is rejected, not stored as-is");
+
+  const badTime = await bookSession({
+    request: formPost("https://ricaspa.beauty/api/book-session", {
+      name: "Test", email: "test@example.com", phone: "254700000000",
+      date: "2026-09-01", time: "not-a-time",
+    }, { "cf-connecting-ip": "10.1.0.8" }),
+    env,
+  });
+  const badTimeBody = await badTime.text();
+  assert(badTimeBody.trim() !== "OK", "a non-time-shaped `time` value is rejected, not stored as-is");
+
+  const rows = await env.DB._raw("SELECT * FROM bookings WHERE email = ?", "test@example.com");
+  assert(rows.length === 0, "neither malformed submission was recorded");
 }
 
 async function scenarioBookingResendDown(env, resend) {
@@ -237,6 +269,24 @@ async function scenarioContactBotChecks(env, resend) {
   });
   assert((await honeypotRes.text()).trim() === "OK", "contact form honeypot behaves the same as the booking form's");
   assert(resend.calls.length === before, "no email sent for the honeypot-tripped contact message");
+}
+
+// ---------------------------------------------------------------------
+// Scenario 12: /api/staff-auth — the "verify passphrase immediately, not
+// on first real action" fix for both staff pages' unlock screens.
+// ---------------------------------------------------------------------
+async function scenarioStaffAuth(env) {
+  section("12. Staff auth — passphrase verified up front");
+  env.STAFF_SECRET = "test-staff-secret";
+
+  const good = await staffAuth({ request: new Request("https://ricaspa.beauty/api/staff-auth", { headers: { "X-Staff-Secret": "test-staff-secret" } }), env });
+  assert(good.status === 200, "correct passphrase returns 200");
+
+  const bad = await staffAuth({ request: new Request("https://ricaspa.beauty/api/staff-auth", { headers: { "X-Staff-Secret": "wrong-guess" } }), env });
+  assert(bad.status === 401, "wrong passphrase returns 401 immediately, not just on the first real lookup");
+
+  const none = await staffAuth({ request: new Request("https://ricaspa.beauty/api/staff-auth") , env });
+  assert(none.status === 401, "no header at all is also rejected");
 }
 
 // ---------------------------------------------------------------------
@@ -392,6 +442,7 @@ async function main() {
     await scenarioBookingHappyPath(env, resend);
     await scenarioBookingMissingFields(env);
     await scenarioBookingBadEmail(env);
+    await scenarioBookingBadDateTime(env);
     await scenarioBookingResendDown(env, resend);
     await scenarioBookingRateLimit(makeEnv());
     await scenarioBookingDegradedNoDB(resend);
@@ -402,6 +453,7 @@ async function main() {
     await scenarioSlotTracker(makeEnv(), resend);
     await scenarioHoneypot(makeEnv(), resend);
     await scenarioTurnstile(makeEnv(), resend, turnstile);
+    await scenarioStaffAuth(makeEnv());
   } finally {
     resend.restore();
     turnstile.restore();
