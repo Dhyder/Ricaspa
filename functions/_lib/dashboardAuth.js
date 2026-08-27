@@ -1,70 +1,12 @@
-// Session-cookie auth for /dashboard. Reuses STAFF_SECRET (same passphrase
-// staff already use for the vouchers/bookings desks) instead of adding a
-// second secret to manage. The dashboard is an SPA with no backend of its
-// own, so it can't hold STAFF_SECRET client-side — instead, logging in here
-// exchanges the passphrase for a short-lived signed cookie. Every dashboard
-// API route in functions/api/dashboard-*.js verifies that cookie
-// server-side; STAFF_SECRET itself never reaches the browser.
-
-const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8h — staff re-auths once per shift
-const COOKIE_NAME = "rica_dash_session";
-
-let cachedKey = null;
-let cachedKeySecret = null;
-
-async function getKey(env) {
-  const secret = env.STAFF_SECRET;
-  if (!secret) return null;
-  if (cachedKey && cachedKeySecret === secret) return cachedKey;
-  cachedKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  cachedKeySecret = secret;
-  return cachedKey;
-}
-
-async function sign(env, payload) {
-  const key = await getKey(env);
-  if (!key) return null;
-  const sigBytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return [...new Uint8Array(sigBytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-// Creates the Set-Cookie header value for a fresh session.
-export async function createSessionCookie(env) {
-  const expires = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
-  const payload = `${expires}`;
-  const sig = await sign(env, payload);
-  if (!sig) return null;
-  const token = `${payload}.${sig}`;
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL_SECONDS}`;
-}
-
-export function clearSessionCookie() {
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
-}
-
-function readCookie(request) {
-  const header = request.headers.get("Cookie") || "";
-  const match = header.split(";").map((s) => s.trim()).find((s) => s.startsWith(`${COOKIE_NAME}=`));
-  if (!match) return null;
-  return match.slice(COOKIE_NAME.length + 1);
-}
-
-// Returns true if the request carries a valid, unexpired session cookie.
-export async function isAuthenticated(context) {
-  const { request, env } = context;
-  const token = readCookie(request);
-  if (!token) return false;
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return false;
-  const expected = await sign(env, payload);
-  if (!expected || expected !== sig) return false;
-  const expires = Number(payload);
-  if (!Number.isFinite(expires) || expires < Math.floor(Date.now() / 1000)) return false;
-  return true;
-}
+const SESSION_TTL_SECONDS=28800,CHECK="rica_dash_session";
+const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+function cookie(r){const h=r.headers.get("Cookie")||"";const m=h.split(";").map(x=>x.trim()).find(x=>x.startsWith(CHECK+"="));return m?decodeURIComponent(m.slice(CHECK.length+1)):null}
+export async function createSessionCookie(env,user){if(!env.DB||!user?.id)return null;const id=hex(crypto.getRandomValues(new Uint8Array(32))),now=new Date(),exp=new Date(now.getTime()+SESSION_TTL_SECONDS*1000);await env.DB.prepare("INSERT INTO dashboard_sessions (id,user_id,expires_at,created_at,last_seen_at) VALUES (?1,?2,?3,?4,?4)").bind(id,user.id,exp.toISOString(),now.toISOString()).run();return `${CHECK}=${encodeURIComponent(id)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_TTL_SECONDS}`}
+export function clearSessionCookie(){return `${CHECK}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`}
+export async function getSession(c){const id=cookie(c.request);if(!id||!c.env.DB)return null;const u=await c.env.DB.prepare("SELECT u.id,u.name,u.email,u.role,u.status FROM dashboard_sessions s JOIN dashboard_users u ON u.id=s.user_id WHERE s.id=?1 AND s.expires_at>?2 AND u.status='active'").bind(id,new Date().toISOString()).first();if(!u)return null;await c.env.DB.prepare("UPDATE dashboard_sessions SET last_seen_at=?2 WHERE id=?1").bind(id,new Date().toISOString()).run();return u}
+export async function requireSession(c){const u=await getSession(c);if(!u)throw Error("Not authorized");return u}
+export async function requireRole(c,roles){const u=await requireSession(c);if(!(Array.isArray(roles)?roles:[roles]).includes(u.role))throw Error("Forbidden");return u}
+export async function destroySession(c){const id=cookie(c.request);if(id&&c.env.DB)await c.env.DB.prepare("DELETE FROM dashboard_sessions WHERE id=?1").bind(id).run()}
+export async function audit(env,user,action,type=null,entity=null,meta=null){if(!env.DB)return;await env.DB.prepare("INSERT INTO dashboard_audit_log (user_id,action,entity_type,entity_id,metadata,created_at) VALUES (?1,?2,?3,?4,?5,?6)").bind(user?.id||null,action,type,entity,meta?JSON.stringify(meta):null,new Date().toISOString()).run()}
+export async function hashPassword(p){const salt=crypto.getRandomValues(new Uint8Array(16)),k=await crypto.subtle.importKey("raw",new TextEncoder().encode(p),"PBKDF2",false,["deriveBits"]),bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt,iterations:120000,hash:"SHA-256"},k,256);return `pbkdf2$120000$${hex(salt)}$${hex(bits)}`}
+export async function verifyPassword(p,e){const[,it,s,h]=String(e||"").split("$");if(!it||!s||!h)return false;const salt=new Uint8Array(s.match(/.{2}/g).map(x=>parseInt(x,16))),k=await crypto.subtle.importKey("raw",new TextEncoder().encode(p),"PBKDF2",false,["deriveBits"]),bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt,iterations:Number(it),hash:"SHA-256"},k,256);return hex(bits)===h}
