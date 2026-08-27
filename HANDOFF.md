@@ -19,58 +19,63 @@ Updated: 2026-08-27
 - Do not invent a replacement visual system.
 - Dashboard should reuse template components/patterns for profiles, users, tables, cards, messages and forms, with Rica branding/content.
 
-## Current dashboard transition
-- A React/Vite dashboard is being built under `dashboard-react/` on `mignon`.
-- It is isolated from the public site/current static dashboard until parity is reached.
-- React now loads live stats, upcoming bookings and orders.
-- React Overview normalizes object-valued stats to scalar display values, preventing `[object Object]`.
-- React Vouchers now calls authenticated `/api/dashboard-vouchers` and displays code, customer, service, value, status, expiry and creation data.
-- React Staff & Users now calls `/api/dashboard-users`, lists real users, and has a real Superuser-only create-user form backed by POST `/api/dashboard-users`.
-- React Activity now calls `/api/dashboard-audit` and renders the real audit trail with user, action, entity and metadata.
-- `functions/api/dashboard-vouchers.js` lists voucher records from KV server-side, skips internal `voucher-ref:*` keys, and returns only dashboard-safe fields. No direct KV access from the browser.
-- Non-admin sections Messages/Customers/Profile still need their real template components and API integrations.
+## Current dashboard
+- Production-facing `/dashboard` is still the static Pages implementation under `dashboard/`.
+- `dashboard/index.html` loads `dashboard/app.js` and `dashboard/rica-dashboard.css`; latest index has cache-busting query strings.
+- React/Vite exists under `dashboard-react/` as an isolated migration target, but is NOT the active `/dashboard` route yet.
+- Do not claim React is live until Pages build/routing is changed and verified.
 
-## Data work
-- `/api/dashboard-stats` has compatibility scalar fields: `totalBookings`, `pendingBookings`, `totalOrders`, `revenue`.
+## Live dashboard data
+- `/api/dashboard-stats` exposes scalar compatibility fields: `totalBookings`, `pendingBookings`, `totalOrders`, `revenue`.
 - `/api/dashboard-bookings?upcoming=1` is the intended upcoming-bookings call.
-- Real booking table: `bookings` with `ref`, `name`, `email`, `phone`, `service`, `preferred_date`, `preferred_time`, `message`, `status`, notifications and timestamps.
-- Voucher storage is KV (`VOUCHERS`); voucher records contain code, buyerName, buyerEmail, buyerPhone, toName, serviceName/value, type, status, createdAt, expiresAt, and optional redemption fields.
-- Valid booking statuses: `new`, `confirmed`, `declined`, `completed`, `no-show`.
-- Never use mock booking/order data.
-- Verify order/revenue mapping against the real API response.
+- `/api/dashboard-orders` provides real voucher order data.
+- `/api/dashboard-vouchers` is wired into the active dashboard and reads real `VOUCHERS` KV records server-side. It excludes `voucher-ref:*` helper keys and returns code/ref, buyerName/email/phone, recipient, service/type, value, status, created/expiry/redemption fields.
+- Active Vouchers page now shows Reference, Customer, Service, Value, Status, Created, Expiry and Redeemed information.
+- Never use mock voucher/order/booking data.
 
-## Auth / users / audit
-- `dashboard-users.js` GET/POST/PATCH are real D1-backed endpoints and Superuser protected.
-- `dashboard-audit.js` is a real Superuser-protected read endpoint over `dashboard_audit_log` joined to `dashboard_users`.
-- `dashboardAuth.js` exposes `isAuthenticated`, `requireSession`, `requireRole`, `audit`, and PBKDF2 helpers.
-- User creation and administrative actions call `audit`; dashboard activity therefore reflects real actions, not demo entries.
+## Staff & Users
+- Active dashboard Staff & Users page calls `GET /api/dashboard-users`, `POST /api/dashboard-users`, and `PATCH /api/dashboard-users`.
+- It lists name, email, role, status and last login; Superusers can create staff and update other users' status.
+- Backend enforces Superuser role and audits `user_created` / `user_updated` actions.
+
+## Activity Log
+- Active dashboard Activity Log calls `GET /api/dashboard-audit`.
+- It shows timestamp, staff name/email, action, entity/entity ID and metadata.
+- Backend joins `dashboard_audit_log` to `dashboard_users` and limits to latest 200 events.
+- Audit actions must be attributed to the authenticated actor; do not fake activity.
 
 ## Product direction
 - Dashboard replaces legacy staff-vouchers/staff-bookings interfaces.
-- Roles: `superuser` and staff/employee.
+- Roles: `superuser` and `employee` (displayed as Staff in UI).
 - Superusers manage staff accounts.
 - All approvals, booking status changes, voucher redemption and administrative actions should be attributable to the authenticated user and written to audit log.
 - Planned customer-facing operational layer: Customers + Messages.
 - Planned WhatsApp integration: WhatsApp Business webhook -> Cloudflare Function -> D1 message records -> React Messages inbox; messages can be associated with customers and booking candidates. Do not fake WhatsApp data.
 
-## Immediate next steps
-1. Finish React UI with actual supplied template components/patterns, not generic replacements.
-2. Implement Profile, Customers and Messages using real template components and APIs.
-3. Add booking actions (confirm/decline/complete) with authenticated actor attribution and audit entries.
-4. Add voucher redemption/admin actions with audit attribution.
-5. Add booking/message linking and customer history.
-6. Only then add WhatsApp Business webhook integration.
-7. Build/test React output before routing production `/dashboard` to it.
-8. Keep static dashboard as fallback until React parity is verified.
+## React migration plan
+1. Finish template-faithful React components for Overview, Bookings, Vouchers, Orders, Profile, Staff & Users, Activity, Customers and Messages.
+2. Reuse the supplied template's actual component patterns instead of another custom visual approximation.
+3. Connect every React page to the real APIs/D1.
+4. Build and verify the React output locally/CI.
+5. Route `/dashboard` to built React output only after parity verification; keep static dashboard as fallback until then.
+
+## Immediate functional priorities
+1. Deploy/verify active dashboard voucher columns.
+2. Verify Superuser Staff & Users create/status actions.
+3. Verify those actions appear in Activity Log with the actor.
+4. Add Profile and Customers.
+5. Add Messages using real contact/booking data.
+6. Add booking/message linking.
+7. Design WhatsApp webhook integration after the internal message/customer model exists.
 
 ## Verification
 - Sign-in and first-Superuser setup work in production.
-- Confirm dashboard stats show numbers, never `[object Object]`.
-- Confirm real upcoming bookings/orders render.
-- Confirm Vouchers shows customer/value/status rather than only reference/timestamp.
-- Confirm Superuser can list/create/manage staff.
-- Confirm Activity shows audit events and actor names.
-- Confirm React build succeeds before production routing changes.
+- Dashboard stats show numbers, never `[object Object]`.
+- Real upcoming bookings/orders render.
+- Vouchers show customer/value/status from KV.
+- Superuser can create/manage staff.
+- Staff/user changes appear in Activity Log.
+- React build succeeds before production routing changes.
 
 ## Honesty rule
 Do not claim a change is complete unless the repository write succeeded and, for deploy/build claims, the corresponding build/deployment result has been verified.
