@@ -1,6 +1,8 @@
-# Rica Spa dashboard auth pages
+# Keep dashboard auth pages outside the dashboard SPA fallback.
 /dashboard/login  /dashboard/login.html  200
 /dashboard/signup  /dashboard/signup.html  200
 
-# SPA fallback for the React dashboard
+# Only authenticated users should reach the dashboard SPA.
+# Authorization is enforced by the dashboard's API/session layer; this
+# fallback only resolves client-side routes after the app has loaded.
 /dashboard/*  /dashboard/index.html  200
