@@ -1,0 +1,1 @@
+Template integration is now being performed from the supplied shadcn-admin source. This marker is intentionally committed alongside the integration work so handoff can verify that the migration is not being represented as complete prematurely.
