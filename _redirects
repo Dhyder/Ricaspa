@@ -1,4 +1,6 @@
-# SPA fallback for the React dashboard — client-side routes (e.g.
-# /dashboard/settings) need to resolve to the dashboard's index.html so
-# TanStack Router can take over, instead of 404ing on a direct hit/refresh.
+# Rica Spa dashboard auth pages
+/dashboard/login  /dashboard/login.html  200
+/dashboard/signup  /dashboard/signup.html  200
+
+# SPA fallback for the React dashboard
 /dashboard/*  /dashboard/index.html  200
