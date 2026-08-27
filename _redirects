@@ -1,6 +1,0 @@
-# Auth entry pages. These are the only dashboard pages exposed without a session.
-/dashboard/login  /dashboard/login.html  200
-/dashboard/signup  /dashboard/signup.html  200
-
-# Do NOT add a dashboard SPA fallback here. Pages middleware protects the
-# dashboard and serves the actual SPA only after authentication.
