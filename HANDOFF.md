@@ -17,11 +17,12 @@ Updated: 2026-08-27
 - User supplied `shadcn-admin-1.0.0.zip` as the authoritative original template.
 - Auth should match the template's SignIn2 / SignUp2 styling.
 - Do not invent a replacement visual system.
-- Dashboard should reuse template components/patterns for profiles, users, tables, cards, messages and forms, with Rica branding/content.
+- Template was inspected directly from the supplied zip. Important reusable pieces include `src/components/ui/sidebar.tsx`, `src/components/layout/app-sidebar.tsx`, `src/components/layout/header.tsx`, `src/components/layout/main.tsx`, `src/components/layout/profile-dropdown.tsx`, `src/components/data-table/pagination.tsx`, `src/components/data-table/toolbar.tsx`, `src/components/data-table/view-options.tsx`, and the users/settings profile components.
+- Current static dashboard does NOT literally run the template React components yet; it currently reproduces selected template interaction patterns. Do not claim full template transplant until the React migration is actually wired to production.
 
 ## Current dashboard
 - Production-facing `/dashboard` is the static Pages implementation under `dashboard/`.
-- `dashboard/index.html` loads `dashboard/app.js`, `dashboard/rica-dashboard.css`, and `dashboard/enhancements.js` with cache-busting versions.
+- `dashboard/index.html` loads `dashboard/app.js`, `dashboard/rica-dashboard.css`, `dashboard/enhancements.js`, `dashboard/lookup-ui.js`, `dashboard/template-layout.js`, and `dashboard/scanner-fix.js` with cache-busting versions.
 - React/Vite exists under `dashboard-react/` as an isolated migration target, but is NOT the active `/dashboard` route yet.
 - Do not claim React is live until Pages build/routing is changed and verified.
 
@@ -29,6 +30,12 @@ Updated: 2026-08-27
 - Rica does NOT use green as its brand color. Do not introduce green as a primary brand color.
 - Dashboard accent direction is derived from the supplied Rica logo: warm brown/tan/gold neutrals, with warm ivory surfaces and restrained dark text.
 - Keep the template's Shadcn layout/component discipline while adapting color, typography and content to Rica.
+
+## Sidebar/layout
+- `dashboard/template-layout.js` now adds a template-style collapsible/offcanvas desktop sidebar.
+- Sidebar is sticky to the viewport, has its own height/overflow boundary, and no longer grows with page content.
+- Collapse state persists in localStorage and can be toggled with the sidebar button or Ctrl/Cmd+B, following the supplied template's sidebar interaction pattern.
+- Mobile remains a stacked navigation layout.
 
 ## Live dashboard data
 - `/api/dashboard-stats` exposes scalar compatibility fields: `totalBookings`, `pendingBookings`, `totalOrders`, `revenue`.
@@ -43,13 +50,15 @@ Updated: 2026-08-27
 - `dashboard/enhancements.js` adds client-side search/lookup and 10-row pagination to rendered dashboard tables.
 - Search searches all visible row text; paging controls show current range and total matches.
 - This is currently client-side because existing endpoints return bounded datasets. If datasets grow substantially, move filtering/pagination server-side with query parameters.
+- Supplied template contains richer reusable data-table primitives; React migration should use those rather than extending the static implementation indefinitely.
 
 ## Voucher tools
-- Vouchers page now injects a visible `Lookup & scan` card above the voucher table.
+- Vouchers page has a visible `Lookup & scan` card above the voucher table.
 - Manual lookup calls `POST /api/redeem-voucher` with `{code, action:"lookup"}`; it does not redeem during lookup.
-- The lookup result shows reference, customer, service, value and status and exposes a separate Redeem action for valid/unredeemed vouchers.
-- Scan uses `getUserMedia` and `BarcodeDetector` where supported. Unsupported browsers still get manual lookup.
-- Camera scanning requires HTTPS/secure context and permission.
+- The lookup result shows reference, customer, service, value and status and exposes a separate Redeem action.
+- `dashboard/scanner-fix.js` now stops the older camera stream and starts a ZXing browser decoder for QR/barcodes after camera permission is granted. It loads the decoder from the jsDelivr/unpkg-compatible CDN at runtime.
+- Scanner displays explicit camera errors and retains manual lookup as fallback.
+- Camera scanning requires HTTPS/secure context and browser camera permission.
 
 ## Navigation
 - Administration navigation is wired through delegated `data-section` handling.
@@ -77,22 +86,25 @@ Updated: 2026-08-27
 - Planned WhatsApp integration: WhatsApp Business webhook -> Cloudflare Function -> D1 message records -> dashboard Messages inbox; messages can be associated with customers and booking candidates. Do not fake WhatsApp data.
 
 ## React migration plan
-1. Finish template-faithful React components for Overview, Bookings, Vouchers, Orders, Profile, Staff & Users, Activity, Customers and Messages.
-2. Reuse the supplied template's actual component patterns instead of another custom visual approximation.
-3. Connect every React page to the real APIs/D1.
-4. Build and verify the React output locally/CI.
-5. Route `/dashboard` to built React output only after parity verification; keep static dashboard as fallback until then.
+1. Port the supplied template's actual Sidebar/SidebarProvider behavior and data-table primitives into `dashboard-react/`.
+2. Port actual Profile, Users, search, pagination, toolbar and related template components rather than another visual approximation.
+3. Adapt those components to Rica branding and dashboard sections: Overview, Bookings, Vouchers, Orders, Profile, Staff & Users, Activity, Customers and Messages.
+4. Connect every React page to the real APIs/D1.
+5. Build and verify the React output locally/CI.
+6. Route `/dashboard` to built React output only after parity verification; keep static dashboard as fallback until then.
 
 ## Immediate functional priorities
 1. Verify the warm Rica palette against the actual supplied logo and remove any remaining green declarations.
-2. Verify table search/pagination on real dashboard data.
-3. Verify voucher manual lookup and camera scanning/redemption flow in HTTPS production.
-4. Verify Superuser Staff & Users create/status actions.
-5. Verify those actions appear in Activity Log with the actor.
-6. Add Profile and Customers using template components.
-7. Add Messages using real contact/booking data.
-8. Add booking/message linking.
-9. Design WhatsApp webhook integration after the internal message/customer model exists.
+2. Verify collapsible sidebar at desktop and responsive behavior at mobile.
+3. Verify table search/pagination on real dashboard data.
+4. Verify voucher manual lookup and camera scanning/redemption flow in HTTPS production.
+5. Verify Superuser Staff & Users create/status actions.
+6. Verify those actions appear in Activity Log with the actor.
+7. Port the actual supplied template components into React.
+8. Add Profile and Customers using template components.
+9. Add Messages using real contact/booking data.
+10. Add booking/message linking.
+11. Design WhatsApp webhook integration after the internal message/customer model exists.
 
 ## Verification
 - Sign-in and first-Superuser setup work in production.
@@ -100,8 +112,9 @@ Updated: 2026-08-27
 - Real upcoming bookings/orders render.
 - Orders show customer, amount, payment state and fulfilment state.
 - Vouchers show customer/value/status from KV.
-- Vouchers can be looked up manually and scanned where BarcodeDetector is supported.
+- Vouchers can be looked up manually and scanned where camera + decoder are available.
 - Overview quick actions navigate to their corresponding sections.
+- Sidebar can collapse and does not grow with content.
 - Superuser can create/manage staff.
 - Staff/user changes appear in Activity Log.
 - React build succeeds before production routing changes.
