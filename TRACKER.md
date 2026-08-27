@@ -50,6 +50,17 @@
   - **How to test:** once sandbox keys are approved, run a full sandbox
     purchase and check every box above. If sandbox approval is slow, a
     single real 500 KES purchase covers the same ground.
+- [ ] **Dashboard user storage is not configured (new blocker, 2026-08-27).**
+      The dashboard reports: `Dashboard user storage is not configured.
+      Bind your D1 database as DB and apply migrations/0004_dashboard_users.sql.`
+      The current `mignon` branch contains migrations 0001–0003 but no
+      `0004_dashboard_users.sql`, so this needs to be reconciled before
+      dashboard authentication/user storage can be considered production-ready.
+      First confirm the live Cloudflare Pages/Workers `DB` binding points to
+      `ricaspa-ledger`; then add/apply the intended 0004 schema and retest
+      `/dashboard` login and protected dashboard APIs. Do not mark resolved
+      until the live deployment can authenticate and persist/read dashboard
+      user records successfully.
 
 ## 🟠 Security & reliability
 
