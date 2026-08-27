@@ -1,0 +1,4 @@
+# SPA fallback for the React dashboard — client-side routes (e.g.
+# /dashboard/settings) need to resolve to the dashboard's index.html so
+# TanStack Router can take over, instead of 404ing on a direct hit/refresh.
+/dashboard/*  /dashboard/index.html  200

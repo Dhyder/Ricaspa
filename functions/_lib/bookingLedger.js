@@ -89,3 +89,35 @@ export async function updateBookingStatus(env, ref, status) {
   `).bind(status, new Date().toISOString(), ref).run();
   return result.meta.changes > 0;
 }
+
+// --- Dashboard read queries -------------------------------------------------
+
+export async function getBookingStatsSummary(env, { from, to } = {}) {
+  const database = db(env);
+  if (!database) return { totalBookings: 0, byStatus: [], byDay: [] };
+
+  const clauses = [];
+  const binds = [];
+  if (from) { clauses.push('created_at >= ?'); binds.push(from); }
+  if (to) { clauses.push('created_at <= ?'); binds.push(to); }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+  const total = await database.prepare(
+    `SELECT COUNT(*) AS totalBookings FROM bookings ${where}`
+  ).bind(...binds).first();
+
+  const byStatusRes = await database.prepare(
+    `SELECT status, COUNT(*) AS count FROM bookings ${where} GROUP BY status`
+  ).bind(...binds).all();
+
+  const byDayRes = await database.prepare(
+    `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS bookings
+     FROM bookings ${where} GROUP BY day ORDER BY day ASC`
+  ).bind(...binds).all();
+
+  return {
+    totalBookings: total?.totalBookings || 0,
+    byStatus: byStatusRes.results || [],
+    byDay: byDayRes.results || [],
+  };
+}

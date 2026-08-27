@@ -132,3 +132,55 @@ export async function getOrder(env, ref) {
   if (!database) return null;
   return database.prepare(`SELECT * FROM orders WHERE ref = ?`).bind(ref).first();
 }
+
+// --- Dashboard read queries ------------------------------------------------
+
+export async function listOrders(env, { from, to, limit = 200 } = {}) {
+  const database = db(env);
+  if (!database) return [];
+  const clauses = [];
+  const binds = [];
+  if (from) { clauses.push('created_at >= ?'); binds.push(from); }
+  if (to) { clauses.push('created_at <= ?'); binds.push(to); }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const stmt = database.prepare(
+    `SELECT ref, type, value, service_name, buyer_name, buyer_email, payment_state,
+            finalization_state, voucher_code, created_at, payment_completed_at
+     FROM orders ${where} ORDER BY created_at DESC LIMIT ?`
+  ).bind(...binds, limit);
+  const { results } = await stmt.all();
+  return results || [];
+}
+
+// Revenue + counts, bucketed by day, for completed (paid) voucher orders only.
+export async function getStatsSummary(env, { from, to } = {}) {
+  const database = db(env);
+  if (!database) return { totalRevenue: 0, totalOrders: 0, byDay: [], byService: [] };
+
+  const clauses = ["payment_state = 'completed'"];
+  const binds = [];
+  if (from) { clauses.push('created_at >= ?'); binds.push(from); }
+  if (to) { clauses.push('created_at <= ?'); binds.push(to); }
+  const where = `WHERE ${clauses.join(' AND ')}`;
+
+  const totals = await database.prepare(
+    `SELECT COUNT(*) AS totalOrders, COALESCE(SUM(value), 0) AS totalRevenue FROM orders ${where}`
+  ).bind(...binds).first();
+
+  const byDayRes = await database.prepare(
+    `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS orders, COALESCE(SUM(value), 0) AS revenue
+     FROM orders ${where} GROUP BY day ORDER BY day ASC`
+  ).bind(...binds).all();
+
+  const byServiceRes = await database.prepare(
+    `SELECT COALESCE(service_name, 'Voucher (no service tied)') AS service, COUNT(*) AS orders, COALESCE(SUM(value), 0) AS revenue
+     FROM orders ${where} GROUP BY service ORDER BY revenue DESC`
+  ).bind(...binds).all();
+
+  return {
+    totalOrders: totals?.totalOrders || 0,
+    totalRevenue: totals?.totalRevenue || 0,
+    byDay: byDayRes.results || [],
+    byService: byServiceRes.results || [],
+  };
+}
