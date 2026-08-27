@@ -1,0 +1,32 @@
+:root {
+  --rica-green: #1d4e3e;
+  --rica-gold: #bf9a58;
+  --rica-cream: #f8f5ef;
+}
+
+body {
+  font-family: Inter, Manrope, system-ui, sans-serif;
+}
+
+/* Rica Spa visual identity over the stock dashboard theme. */
+[data-slot="sidebar"] [data-sidebar="sidebar"] {
+  border-right-color: color-mix(in srgb, var(--rica-gold) 25%, transparent);
+}
+
+[data-slot="sidebar"] [data-sidebar="menu-button"][data-active="true"] {
+  background: color-mix(in srgb, var(--rica-green) 12%, transparent);
+  color: var(--rica-green);
+}
+
+button.bg-primary,
+a.bg-primary {
+  background-color: var(--rica-green) !important;
+}
+
+.text-primary {
+  color: var(--rica-green) !important;
+}
+
+#root {
+  min-height: 100vh;
+}
