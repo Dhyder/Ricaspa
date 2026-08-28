@@ -1,5 +1,5 @@
-import { json } from "../_lib/voucherCore.js";
-import { requireSession } from "../_lib/dashboardAuth.js";
+import { json, verifyVoucherSignature } from "../_lib/voucherCore.js";
+import { requireSession, audit } from "../_lib/dashboardAuth.js";
 
 export async function onRequestGet(c) {
   try {
@@ -40,4 +40,65 @@ export async function onRequestGet(c) {
   } catch (e) {
     return json({ error: e.message }, e.message === "Forbidden" ? 403 : 401);
   }
+}
+
+// POST /api/dashboard-vouchers   body: { code, action: 'lookup'|'redeem', signature? }
+// Session-protected (any active dashboard user, not just superuser) —
+// this is the dashboard's replacement for staff-vouchers.html's redeem
+// action. Every redeem is written to dashboard_audit_log with the acting
+// user, unlike the old X-Staff-Secret flow which had no per-user trail.
+export async function onRequestPost(c) {
+  let user;
+  try {
+    user = await requireSession(c);
+  } catch (e) {
+    return json({ error: e.message }, 401);
+  }
+
+  const { request, env } = c;
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid request body" }, 400);
+  }
+
+  const code = (body.code || "").trim().toUpperCase();
+  const action = body.action === "redeem" ? "redeem" : "lookup";
+  const signature = body.signature ? String(body.signature).trim() : null;
+
+  if (!code) return json({ error: "Missing code" }, 400);
+  if (!env.VOUCHERS) return json({ error: "Voucher storage is not configured" }, 503);
+
+  if (signature) {
+    const valid = await verifyVoucherSignature(env, code, signature);
+    if (valid === false) {
+      return json({ error: "QR signature invalid — this code may have been altered or fabricated" }, 400);
+    }
+  }
+
+  const raw = await env.VOUCHERS.get(code);
+  if (!raw) return json({ error: "Voucher code not found" }, 404);
+
+  const record = JSON.parse(raw);
+
+  if (action === "lookup") return json({ voucher: record });
+
+  if (record.status === "redeemed") {
+    return json({ error: "Already redeemed", voucher: record }, 409);
+  }
+
+  const expiresAt = new Date(record.expiresAt);
+  if (expiresAt < new Date()) {
+    return json({ error: "Voucher has expired", voucher: record }, 410);
+  }
+
+  record.status = "redeemed";
+  record.redeemedAt = new Date().toISOString();
+  record.redeemedBy = user.name || user.email;
+  await env.VOUCHERS.put(code, JSON.stringify(record));
+
+  await audit(env, user, "voucher_redeemed", "voucher", code, { buyerEmail: record.buyerEmail || null });
+
+  return json({ voucher: record });
 }
