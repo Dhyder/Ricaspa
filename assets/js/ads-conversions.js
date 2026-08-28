@@ -11,25 +11,36 @@
 // unique per form and doesn't require adding IDs/classes just for this.
 
 document.addEventListener('rica:form-success', function (event) {
-  if (typeof gtag !== 'function') return; // gtag.js blocked/not loaded (ad blocker, etc.) — nothing to do
   const action = event.detail && event.detail.action;
 
   if (action === '/api/book-session') {
-    gtag('event', 'conversion', {
-      'send_to': 'AW-16973029826/R1P-CLaU3ugcEMLDr50_',
-      'value': 1.0,
-      'currency': 'USD',
-    });
+    if (typeof gtag === 'function') {
+      gtag('event', 'conversion', {
+        'send_to': 'AW-16973029826/R1P-CLaU3ugcEMLDr50_',
+        'value': 1.0,
+        'currency': 'USD',
+      });
+    }
+    if (typeof fbq === 'function') {
+      // 'Schedule' is Meta's standard event for booking an appointment —
+      // lets Meta's ad delivery optimize for actual bookings, not just clicks.
+      fbq('track', 'Schedule');
+    }
     return;
   }
 
-  // Contact form (/api/contact-message) and voucher purchases both still
-  // need their own conversion action created in Google Ads (Tools &
-  // Settings → Conversions) before a label exists to fire here — not a
-  // code gap, just waiting on that label. Once you have it, add another
-  // `if (action === '/api/contact-message') { ... }` block the same shape
-  // as the one above. Voucher purchases don't go through validate.js at
-  // all (different checkout flow in vouchers.html/voucher.js), so that one
-  // needs its own gtag call at the point voucher.js confirms payment
-  // succeeded, not here.
+  if (action === '/api/contact-message') {
+    if (typeof fbq === 'function') {
+      fbq('track', 'Contact');
+    }
+    // Still needs its own Google Ads conversion label (Tools & Settings →
+    // Conversions) before a gtag call can be added here the same shape as
+    // the booking one above.
+    return;
+  }
+
+  // Voucher purchases don't go through validate.js at all (different
+  // checkout flow in vouchers.html/voucher.js) — both their Google Ads
+  // conversion and Meta Pixel Purchase event fire from voucher.js at the
+  // point payment is confirmed, not here.
 });

@@ -21,6 +21,7 @@ export async function onRequestGet(context) {
         code: order.voucher_code || undefined,
         emailWarning: order.email_warning || null,
         emailState: order.email_state || null,
+        value: order.value ?? null,
       });
     }
 
