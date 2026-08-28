@@ -173,12 +173,28 @@
 - [x] **Google Ads conversion — booking form wired**, 2026-08-25
       (`assets/js/ads-conversions.js`, fires on the `rica:form-success`
       event `validate.js` now dispatches on real success).
-- [ ] **Google Ads conversion — contact form + voucher purchase still
-      need conversion labels from the site owner** (Google Ads → Tools &
-      Settings → Conversions) before they can be wired. Voucher purchase
-      is structurally different — doesn't go through `validate.js`, needs
-      its own `gtag()` call in `voucher.js` at the payment-confirmed point,
-      not the same event listener as the other two forms.
+- [x] **Google Ads conversion — voucher purchase wired** (`voucher.js`,
+      fires in `pollOrderStatus()` once `status === 'completed'`, guarded
+      by `sessionStorage` so it can't double-fire on refresh). This line
+      previously said it was still outstanding — it isn't; verified
+      against the deployed code 2026-08-29.
+- [ ] **Google Ads conversion — contact form still needs a conversion
+      label from the site owner** (Google Ads → Tools & Settings →
+      Conversions) before it can be wired the same way the booking form
+      is in `ads-conversions.js`. Deliberately parked, 2026-08-29 — not
+      a blocker, just waiting on that label.
+- [x] **Two Meta Pixel IDs both fire on every event** (`1509859970591925`
+      and `2326027024809294`, added 2026-08-28) across `index.html`,
+      `vouchers.html`, `services.html`. **Confirmed intentional 2026-08-29
+      — two separate ad accounts, not a bug.** Don't "clean up" or dedupe
+      this without checking with the site owner first.
+- [ ] **`services.html` is a live but orphaned page** — not linked from
+      the main nav, generic placeholder title, no Google Ads tag, and its
+      booking/contact forms still POST to the dead `forms/book-a-table.php`
+      / `forms/contact.php` PHP handlers (same ones marked dead below).
+      **Left alone deliberately, 2026-08-29** — if anything ever routes
+      traffic there (an old link, a bookmark, an ad), submissions silently
+      fail. Revisit if that page turns out to matter.
 
 ## ✅ Done
 
