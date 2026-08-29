@@ -34,8 +34,11 @@
           if (typeof gtag === 'function') {
             gtag('event', 'conversion', {
               'send_to': 'AW-16973029826/DsrWCL3e1OgcEMLDr50_',
-              'value': 1.0,
-              'currency': 'USD',
+              // Real order amount/currency, not a flat placeholder — Google
+              // Ads converts to account currency for ROAS reporting itself,
+              // same as the fbq call just below.
+              'value': typeof data.value === 'number' ? data.value : 0,
+              'currency': 'KES',
               'transaction_id': ref,
             });
           }
