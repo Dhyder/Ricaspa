@@ -33,7 +33,9 @@
         if (!sessionStorage.getItem(firedKey)) {
           if (typeof gtag === 'function') {
             gtag('event', 'conversion', {
-              'send_to': 'AW-16973029826/DsrWCL3e1OgcEMLDr50_',
+              // Relabeled 2026-08-30 when the conversion action was recreated
+              // in Google Ads (old label DsrWCL3e1OgcEMLDr50_ is now deleted).
+              'send_to': 'AW-16973029826/e4s4COneseocEMLDr50_',
               // Real order amount/currency, not a flat placeholder — Google
               // Ads converts to account currency for ROAS reporting itself,
               // same as the fbq call just below.
