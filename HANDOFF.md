@@ -6,15 +6,23 @@ Branch: `mignon`
 ## 🔴 LIVE INCIDENT — read this first
 
 **Confirmed: `mignon` IS Cloudflare Pages' Production branch** — everything
-below is live, not staging. (The stale preview URL seen earlier was just
-an old deployment link, nothing more.)
+below is live, not staging.
 
-IntaSend reports 100% webhook delivery failure to `/api/payment-webhook`.
+IntaSend webhook delivery to `/api/payment-webhook` has been failing
+since **at least 2026-08-21** (confirmed from IntaSend's own event log —
+20 straight FAILED `collection_event` deliveries, 08-21 through 08-23),
+and **IntaSend auto-deactivated the webhook subscription** because of it.
+This is a 10+ day incident, not an isolated case — assume every voucher
+purchase in that window may be affected, not just the one first reported.
+
 Strong suspected cause (not confirmed — no Cloudflare env access from
 here): `env.INTASEND_WEBHOOK_CHALLENGE` mismatch, so every webhook call
 gets 401'd before finalization logic ever runs — this breaks COMPLETE
 *and* FAILED webhooks equally, since the challenge check happens before
-the state branch.
+the state branch. **Fixing the env var alone will not resume
+deliveries** — the subscription was deactivated, so it needs to be
+explicitly reactivated in IntaSend's dashboard too, then redeployed, then
+verified with a real test purchase.
 
 **Don't assume every affected order was a successful charge.** The first
 reported case turned out to be the opposite: IntaSend's Transactions tab
@@ -26,12 +34,13 @@ correctly moving to `failed`. No charge happened, nothing to refund, just
 a record that needs correcting. Check IntaSend directly per order before
 deciding which recovery action applies.
 
-Full detail and both recovery actions are in `TRACKER.md`'s 🔴 Critical
-section (top entry) — read that before touching payment code. Site owner
-needs to check/fix the env var in Cloudflare;
+Full detail, the exact fix sequence, and both recovery actions are in
+`TRACKER.md`'s 🔴 Critical section (top entry) — read that before
+touching payment code.
 `/api/dashboard-reprocess-payment` (`outcome: 'completed'` or `'failed'`)
-+ the Vouchers page's two "Stuck Payments" panels handle both cases, but
-neither fixes the root cause.
++ the Vouchers page's two "Stuck Payments" panels (scanning the last 500
+orders as of 2026-08-31, to cover the full incident window) handle both
+cases, but neither fixes the root cause.
 
 ## CURRENT TRUTH
 

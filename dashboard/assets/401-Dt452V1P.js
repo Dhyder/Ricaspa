@@ -1,0 +1,1 @@
+import{t as e}from"./unauthorized-error-yUIwzaIO.js";var t=e;export{t as component};

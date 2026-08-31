@@ -1,0 +1,1 @@
+import{R as e}from"./index-CMT3hyGk.js";var t=e;export{t as component};

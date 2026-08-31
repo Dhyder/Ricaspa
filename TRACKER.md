@@ -2,10 +2,22 @@
 
 ## 🔴 Critical — verify before any real launch
 
-- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure.**
-      **Confirmed: `mignon` IS Cloudflare's Production branch** — this is
-      live, not a staging artifact. IntaSend's own dashboard reports every
-      call to `https://ricaspa.beauty/api/payment-webhook` failing.
+- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure —
+      SCOPE WIDENED: traced back to 2026-08-21, not just one recent
+      customer.** **Confirmed: `mignon` IS Cloudflare's Production
+      branch** — this is live, not a staging artifact. IntaSend's own
+      dashboard reports every call to
+      `https://ricaspa.beauty/api/payment-webhook` failing.
+      **Site owner pulled IntaSend's webhook event log, 2026-08-31: 20
+      `collection_event` deliveries, all FAILED, spanning 2026-08-21
+      02:41am through 2026-08-23 3:25pm — and IntaSend deactivated the
+      webhook subscription because of the failure rate.** This means (a)
+      the breakage is at least 10 days old as of this writing, likely
+      affecting every voucher purchase in that window, not an isolated
+      case, and (b) fixing the challenge secret alone will NOT resume
+      deliveries — a deactivated webhook subscription needs to be
+      explicitly reactivated in IntaSend's dashboard after the underlying
+      cause is fixed, or nothing will flow even with a correct secret.
       Root cause, strongly suspected but NOT YET CONFIRMED (no Cloudflare
       env var access from here): `payment-webhook.js` hard-rejects with
       401 the instant `body.challenge !== env.INTASEND_WEBHOOK_CHALLENGE`
@@ -26,11 +38,22 @@
       order is a "customer paid, we owe them a voucher" case — some are
       "payment failed, we owe them nothing, just correct the record."
       Confirm each one against IntaSend directly before acting.
-      **ACTION NEEDED FROM SITE OWNER:** compare the challenge/secret
-      value configured in IntaSend's webhook settings against
-      `INTASEND_WEBHOOK_CHALLENGE` in Cloudflare Pages → Settings →
-      Environment variables (Production). Fix the mismatch, then
-      redeploy so the Function picks up the corrected value.
+      **ACTION NEEDED FROM SITE OWNER, in this order:**
+      1. Compare the challenge/secret value configured in IntaSend's
+         webhook settings against `INTASEND_WEBHOOK_CHALLENGE` in
+         Cloudflare Pages → Settings → Environment variables
+         (Production). Fix the mismatch.
+      2. **Explicitly reactivate the webhook subscription in IntaSend's
+         dashboard** — it was auto-deactivated, fixing the secret alone
+         won't turn deliveries back on.
+      3. Redeploy so the Function picks up the corrected env var.
+      4. Do a real test purchase and confirm the webhook actually
+         delivers and finalizes automatically — that's the real
+         confirmation, not just "the values match now."
+      5. Audit every order from 2026-08-21 onward for stuck state — the
+         dashboard's Stuck Payments panels (widened to scan the last 500
+         orders, 2026-08-31) cover this by default, or query directly:
+         `GET /api/dashboard-orders?from=2026-08-21` for a manual pass.
       **RECOVERY BUILT, 2026-08-31, extended same day:**
       `/api/dashboard-reprocess-payment` (superuser-only) — body
       `{ref, outcome}`. `outcome: 'completed'` (default) re-runs the exact
