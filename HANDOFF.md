@@ -1,7 +1,28 @@
 # Ricaspa — AI Handoff
 
-Updated: 2026-08-29
+Updated: 2026-08-31
 Branch: `mignon`
+
+## 🔴 LIVE INCIDENT — read this first
+
+IntaSend reports 100% webhook delivery failure to `/api/payment-webhook`.
+Strong suspected cause (not confirmed — no Cloudflare env access from
+here): `env.INTASEND_WEBHOOK_CHALLENGE` mismatch, so every webhook call
+gets 401'd before finalization logic ever runs. Customers are paying and
+not receiving vouchers. Full detail and the recovery tool built for it
+are in `TRACKER.md`'s 🔴 Critical section (top entry) — read that before
+touching payment code. Site owner needs to check/fix the env var in
+Cloudflare; `/api/dashboard-reprocess-payment` + the Vouchers page's
+"Stuck Payments" panel recover orders already affected, but don't fix the
+root cause.
+
+**Also unconfirmed:** whether Cloudflare Pages' Production branch is
+actually set to `mignon`. A preview URL shown to the AI on 2026-08-31
+served stale content (the marketing homepage instead of the dashboard),
+consistent with either an old deployment link or `mignon` not being the
+production branch at all. If it's not, none of this session's dashboard
+work is reaching real customers. Confirm in Cloudflare Pages → project →
+Settings → Builds & deployments → Production branch.
 
 ## CURRENT TRUTH
 
@@ -45,8 +66,11 @@ based on whether a superuser already exists.
 - Session-protected data APIs, all under `/api/dashboard-*.js`:
   `-stats`, `-orders`, `-bookings` (GET list / POST status update),
   `-vouchers` (GET list / POST lookup-or-redeem), `-users` (superuser:
-  GET/POST/PATCH), `-audit` (superuser: GET). The redeem and
-  status-update actions did not exist before this session — the dashboard
+  GET/POST/PATCH), `-audit` (superuser: GET),
+  `-reprocess-payment` (superuser: POST `{ref}` — manual recovery for
+  orders paid but never finalized, see 🔴 LIVE INCIDENT above). The
+  redeem, status-update, and reprocess-payment actions did not exist
+  before this session — the dashboard
   could view vouchers/bookings but not act on them. Both now write to
   `dashboard_audit_log` with the acting user.
 - Never substitute mock operational data.

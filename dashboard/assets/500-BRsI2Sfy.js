@@ -1,1 +1,0 @@
-import{R as e}from"./index-BKiFNZcm.js";var t=e;export{t as component};

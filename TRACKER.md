@@ -2,6 +2,37 @@
 
 ## 🔴 Critical — verify before any real launch
 
+- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure —
+      customers are paying and not getting vouchers.** IntaSend's own
+      dashboard is reporting every call to
+      `https://ricaspa.beauty/api/payment-webhook` failing. Root cause,
+      strongly suspected but NOT YET CONFIRMED (no Cloudflare env var
+      access from here): `payment-webhook.js` hard-rejects with 401 the
+      instant `body.challenge !== env.INTASEND_WEBHOOK_CHALLENGE` — so if
+      that env var is unset, wrong, or IntaSend regenerated their webhook
+      secret (same pattern as the Google Ads conversion label breaking
+      after a "recreation" — see below), every single webhook bounces
+      before any finalization logic runs. Matches the reported symptoms
+      exactly: payment_state shows completed (IntaSend really did charge
+      the customer) but finalization_state never advances past pending,
+      so no voucher code is ever minted in KV and nothing shows up in the
+      dashboard's voucher list.
+      **ACTION NEEDED FROM SITE OWNER:** compare the challenge/secret
+      value configured in IntaSend's webhook settings against
+      `INTASEND_WEBHOOK_CHALLENGE` in Cloudflare Pages → Settings →
+      Environment variables (Production). Fix the mismatch, then
+      redeploy so the Function picks up the corrected value.
+      **RECOVERY BUILT, 2026-08-31:** `/api/dashboard-reprocess-payment`
+      (superuser-only) manually re-runs the exact finalization path the
+      webhook would have, for any order stuck with
+      `payment_state=completed` + `finalization_state≠completed`. Surfaced
+      in the dashboard's Vouchers page as a "Stuck Payments" panel
+      (superuser view only) — lists affected orders with a one-click
+      Reprocess button. Use this to unstick every customer caught in this
+      window; it does NOT fix the root cause, only recovers orders
+      already affected. Once the env var is corrected, new payments
+      should finalize normally via the real webhook again — confirm with
+      a real test purchase before assuming it's fixed.
 - [ ] **Confirm migrations 0002 and 0003 are actually applied to the live
       D1 database.** Very likely cause of a real production 500 on
       `/api/book-session` (fixed in code — see below — but the underlying
