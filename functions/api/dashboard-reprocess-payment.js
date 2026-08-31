@@ -1,17 +1,14 @@
-// POST /api/dashboard-reprocess-payment   body: { ref }
-// Superuser only. Manually runs the exact same finalization path as the
-// IntaSend COMPLETE webhook (payment-webhook.js) — for orders where
-// payment_state is 'completed' (IntaSend actually charged the customer)
-// but finalization_state never advanced, because the webhook call itself
-// never made it past IntaSend's challenge check. Existed because of a
-// real incident: IntaSend reported 100% webhook delivery failure, which
-// meant every voucher purchase in that window was paid but never
-// finalized (no voucher code minted, no email sent). See HANDOFF.md.
+// POST /api/dashboard-reprocess-payment   body: { ref, outcome? }
+// outcome: 'completed' (default) — finalize as a successful payment.
+// outcome: 'failed' — mark the order failed instead. Needed because the
+// same 401 bug that swallowed COMPLETE webhooks also swallowed FAILED
+// ones: an order whose IntaSend collection genuinely failed can be stuck
+// forever at payment_state='pending' since the webhook that would have
+// moved it to 'failed' never arrived either. Confirm against IntaSend's
+// own Transactions/Collection Analysis before using this — it does not
+// re-check payment status anywhere itself, it trusts the caller.
 //
-// Safe to call even if the underlying webhook issue gets fixed and
-// retries start flowing again — claimPaymentForFinalization() only lets
-// one caller (this endpoint or a real webhook retry) win the claim, so a
-// race just results in one succeeding and the other getting a no-op "OK".
+// Superuser only.
 
 import { json } from "../_lib/voucherCore.js";
 import { finalizeVoucher } from "../_lib/voucherCore.js";
@@ -21,6 +18,7 @@ import {
   claimPaymentForFinalization,
   markFinalizationSuccess,
   markFinalizationFailed,
+  markPaymentFailed,
 } from "../_lib/ledger.js";
 
 export async function onRequestPost(c) {
@@ -40,10 +38,22 @@ export async function onRequestPost(c) {
   }
 
   const ref = (body.ref || "").trim();
+  const outcome = body.outcome === "failed" ? "failed" : "completed";
   if (!ref) return json({ error: "Missing ref" }, 400);
 
   const order = await getOrder(env, ref);
   if (!order) return json({ error: "No order found with that ref" }, 404);
+
+  if (outcome === "failed") {
+    if (order.payment_state === "completed") {
+      return json({ error: "This order is marked completed (charged) — can't mark it failed. If IntaSend actually shows it failed, that's a real conflict, don't override blindly." }, 409);
+    }
+    await markPaymentFailed(env, ref, "Manually marked failed via dashboard — confirmed no successful IntaSend transaction for this ref");
+    await env.VOUCHERS.delete(`pending:${ref}`);
+    await env.VOUCHERS.put(`failed:${ref}`, JSON.stringify({ reason: "manually_marked_failed" }), { expirationTtl: 60 * 60 * 24 });
+    await audit(env, user, "payment_manually_marked_failed", "order", ref, {});
+    return json({ ok: true, ref, status: "failed" });
+  }
 
   if (order.payment_state !== "completed") {
     return json({

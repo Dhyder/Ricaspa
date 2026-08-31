@@ -5,24 +5,33 @@ Branch: `mignon`
 
 ## 🔴 LIVE INCIDENT — read this first
 
+**Confirmed: `mignon` IS Cloudflare Pages' Production branch** — everything
+below is live, not staging. (The stale preview URL seen earlier was just
+an old deployment link, nothing more.)
+
 IntaSend reports 100% webhook delivery failure to `/api/payment-webhook`.
 Strong suspected cause (not confirmed — no Cloudflare env access from
 here): `env.INTASEND_WEBHOOK_CHALLENGE` mismatch, so every webhook call
-gets 401'd before finalization logic ever runs. Customers are paying and
-not receiving vouchers. Full detail and the recovery tool built for it
-are in `TRACKER.md`'s 🔴 Critical section (top entry) — read that before
-touching payment code. Site owner needs to check/fix the env var in
-Cloudflare; `/api/dashboard-reprocess-payment` + the Vouchers page's
-"Stuck Payments" panel recover orders already affected, but don't fix the
-root cause.
+gets 401'd before finalization logic ever runs — this breaks COMPLETE
+*and* FAILED webhooks equally, since the challenge check happens before
+the state branch.
 
-**Also unconfirmed:** whether Cloudflare Pages' Production branch is
-actually set to `mignon`. A preview URL shown to the AI on 2026-08-31
-served stale content (the marketing homepage instead of the dashboard),
-consistent with either an old deployment link or `mignon` not being the
-production branch at all. If it's not, none of this session's dashboard
-work is reaching real customers. Confirm in Cloudflare Pages → project →
-Settings → Builds & deployments → Production branch.
+**Don't assume every affected order was a successful charge.** The first
+reported case turned out to be the opposite: IntaSend's Transactions tab
+had no record at all for that customer (not completed, failed, or
+pending), while Collection Analysis showed a failed collection — meaning
+the payment genuinely failed and the FAILED webhook got swallowed too,
+leaving the D1 order stuck at `payment_state=pending` instead of
+correctly moving to `failed`. No charge happened, nothing to refund, just
+a record that needs correcting. Check IntaSend directly per order before
+deciding which recovery action applies.
+
+Full detail and both recovery actions are in `TRACKER.md`'s 🔴 Critical
+section (top entry) — read that before touching payment code. Site owner
+needs to check/fix the env var in Cloudflare;
+`/api/dashboard-reprocess-payment` (`outcome: 'completed'` or `'failed'`)
++ the Vouchers page's two "Stuck Payments" panels handle both cases, but
+neither fixes the root cause.
 
 ## CURRENT TRUTH
 

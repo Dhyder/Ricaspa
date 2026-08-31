@@ -2,34 +2,49 @@
 
 ## 🔴 Critical — verify before any real launch
 
-- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure —
-      customers are paying and not getting vouchers.** IntaSend's own
-      dashboard is reporting every call to
-      `https://ricaspa.beauty/api/payment-webhook` failing. Root cause,
-      strongly suspected but NOT YET CONFIRMED (no Cloudflare env var
-      access from here): `payment-webhook.js` hard-rejects with 401 the
-      instant `body.challenge !== env.INTASEND_WEBHOOK_CHALLENGE` — so if
-      that env var is unset, wrong, or IntaSend regenerated their webhook
-      secret (same pattern as the Google Ads conversion label breaking
-      after a "recreation" — see below), every single webhook bounces
-      before any finalization logic runs. Matches the reported symptoms
-      exactly: payment_state shows completed (IntaSend really did charge
-      the customer) but finalization_state never advances past pending,
-      so no voucher code is ever minted in KV and nothing shows up in the
-      dashboard's voucher list.
+- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure.**
+      **Confirmed: `mignon` IS Cloudflare's Production branch** — this is
+      live, not a staging artifact. IntaSend's own dashboard reports every
+      call to `https://ricaspa.beauty/api/payment-webhook` failing.
+      Root cause, strongly suspected but NOT YET CONFIRMED (no Cloudflare
+      env var access from here): `payment-webhook.js` hard-rejects with
+      401 the instant `body.challenge !== env.INTASEND_WEBHOOK_CHALLENGE`
+      — so if that env var is unset, wrong, or IntaSend regenerated their
+      webhook secret (same pattern as the Google Ads conversion label
+      breaking after a "recreation" — see below), every single webhook
+      bounces before any finalization logic runs, regardless of whether
+      the underlying transaction succeeded or failed.
+      **CORRECTED, 2026-08-31 (site owner checked IntaSend directly):**
+      the first reported case was NOT a charged-but-unfinalized order —
+      IntaSend's Transactions tab shows no completed/failed/pending
+      record at all for that customer under their own identifiers, while
+      Collection Analysis shows one failed collection. Read as: the
+      payment itself genuinely failed on IntaSend's side (customer was
+      NOT charged), and the FAILED webhook was swallowed by the same 401
+      bug — leaving the D1 order stuck at `payment_state=pending` forever
+      instead of correctly moving to `failed`. Don't assume every stuck
+      order is a "customer paid, we owe them a voucher" case — some are
+      "payment failed, we owe them nothing, just correct the record."
+      Confirm each one against IntaSend directly before acting.
       **ACTION NEEDED FROM SITE OWNER:** compare the challenge/secret
       value configured in IntaSend's webhook settings against
       `INTASEND_WEBHOOK_CHALLENGE` in Cloudflare Pages → Settings →
       Environment variables (Production). Fix the mismatch, then
       redeploy so the Function picks up the corrected value.
-      **RECOVERY BUILT, 2026-08-31:** `/api/dashboard-reprocess-payment`
-      (superuser-only) manually re-runs the exact finalization path the
-      webhook would have, for any order stuck with
-      `payment_state=completed` + `finalization_state≠completed`. Surfaced
-      in the dashboard's Vouchers page as a "Stuck Payments" panel
-      (superuser view only) — lists affected orders with a one-click
-      Reprocess button. Use this to unstick every customer caught in this
-      window; it does NOT fix the root cause, only recovers orders
+      **RECOVERY BUILT, 2026-08-31, extended same day:**
+      `/api/dashboard-reprocess-payment` (superuser-only) — body
+      `{ref, outcome}`. `outcome: 'completed'` (default) re-runs the exact
+      finalization path the webhook would have, for orders stuck at
+      `payment_state=completed` + `finalization_state≠completed`.
+      `outcome: 'failed'` instead marks a long-stuck `pending` order as
+      failed (for the genuinely-failed-payment case above) — this does
+      NOT re-verify against IntaSend itself, it trusts whoever clicks it,
+      so check IntaSend first. Surfaced in the dashboard's Vouchers page
+      as two panels: "charged but not finalized" (Reprocess button) and
+      "stuck pending >20min" (Mark failed button, with an explicit
+      in-UI warning to check IntaSend before using it). Neither panel
+      fixes the root cause, only recovers/corrects orders already
+
       already affected. Once the env var is corrected, new payments
       should finalize normally via the real webhook again — confirm with
       a real test purchase before assuming it's fixed.
