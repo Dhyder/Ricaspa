@@ -1,0 +1,1 @@
+(()=>{const boot=()=>{document.querySelectorAll('.template-table-shell').forEach(shell=>{shell.querySelector('.template-toolbar')?.remove();shell.querySelector('.template-pagination')?.remove();});};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();new MutationObserver(boot).observe(document.body,{childList:true,subtree:true});})();
