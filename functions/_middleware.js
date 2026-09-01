@@ -29,6 +29,12 @@ export async function onRequest(context) {
     .on("head", { element(element) {
       element.append('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#173d31">', { html: true });
     }})
+    .on("a", { element(element) {
+      const href = element.getAttribute("href");
+      if (href === "#book-a-session" || href === "/#book-a-session" || href === "https://www.ricaspa.beauty/#book-a-session") {
+        element.setAttribute("href", "/book-a-session.html");
+      }
+    }})
     .on("body", { element(element) {
       element.append('<script src="/assets/js/tiktok-events.js" defer></script><script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));}</script>', { html: true });
     }}).transform(response);
