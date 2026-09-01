@@ -2,290 +2,44 @@
 
 ## 🔴 Critical — verify before any real launch
 
-- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure —
-      SCOPE WIDENED: traced back to 2026-08-21, not just one recent
-      customer.** **Confirmed: `mignon` IS Cloudflare's Production
-      branch** — this is live, not a staging artifact. IntaSend's own
-      dashboard reports every call to
-      `https://ricaspa.beauty/api/payment-webhook` failing.
-      **Site owner pulled IntaSend's webhook event log, 2026-08-31: 20
-      `collection_event` deliveries, all FAILED, spanning 2026-08-21
-      02:41am through 2026-08-23 3:25pm — and IntaSend deactivated the
-      webhook subscription because of the failure rate.** This means (a)
-      the breakage is at least 10 days old as of this writing, likely
-      affecting every voucher purchase in that window, not an isolated
-      case, and (b) fixing the challenge secret alone will NOT resume
-      deliveries — a deactivated webhook subscription needs to be
-      explicitly reactivated in IntaSend's dashboard after the underlying
-      cause is fixed, or nothing will flow even with a correct secret.
-      Root cause, strongly suspected but NOT YET CONFIRMED (no Cloudflare
-      env var access from here): `payment-webhook.js` hard-rejects with
-      401 the instant `body.challenge !== env.INTASEND_WEBHOOK_CHALLENGE`
-      — so if that env var is unset, wrong, or IntaSend regenerated their
-      webhook secret (same pattern as the Google Ads conversion label
-      breaking after a "recreation" — see below), every single webhook
-      bounces before any finalization logic runs, regardless of whether
-      the underlying transaction succeeded or failed.
-      **CORRECTED, 2026-08-31 (site owner checked IntaSend directly):**
-      the first reported case was NOT a charged-but-unfinalized order —
-      IntaSend's Transactions tab shows no completed/failed/pending
-      record at all for that customer under their own identifiers, while
-      Collection Analysis shows one failed collection. Read as: the
-      payment itself genuinely failed on IntaSend's side (customer was
-      NOT charged), and the FAILED webhook was swallowed by the same 401
-      bug — leaving the D1 order stuck at `payment_state=pending` forever
-      instead of correctly moving to `failed`. Don't assume every stuck
-      order is a "customer paid, we owe them a voucher" case — some are
-      "payment failed, we owe them nothing, just correct the record."
-      Confirm each one against IntaSend directly before acting.
-      **ACTION NEEDED FROM SITE OWNER, in this order:**
-      1. Compare the challenge/secret value configured in IntaSend's
-         webhook settings against `INTASEND_WEBHOOK_CHALLENGE` in
-         Cloudflare Pages → Settings → Environment variables
-         (Production). Fix the mismatch.
-      2. **Explicitly reactivate the webhook subscription in IntaSend's
-         dashboard** — it was auto-deactivated, fixing the secret alone
-         won't turn deliveries back on.
-      3. Redeploy so the Function picks up the corrected env var.
-      4. Do a real test purchase and confirm the webhook actually
-         delivers and finalizes automatically — that's the real
-         confirmation, not just "the values match now."
-      5. Audit every order from 2026-08-21 onward for stuck state — the
-         dashboard's Stuck Payments panels (widened to scan the last 500
-         orders, 2026-08-31) cover this by default, or query directly:
-         `GET /api/dashboard-orders?from=2026-08-21` for a manual pass.
-      **RECOVERY BUILT, 2026-08-31, extended same day:**
-      `/api/dashboard-reprocess-payment` (superuser-only) — body
-      `{ref, outcome}`. `outcome: 'completed'` (default) re-runs the exact
-      finalization path the webhook would have, for orders stuck at
-      `payment_state=completed` + `finalization_state≠completed`.
-      `outcome: 'failed'` instead marks a long-stuck `pending` order as
-      failed (for the genuinely-failed-payment case above) — this does
-      NOT re-verify against IntaSend itself, it trusts whoever clicks it,
-      so check IntaSend first. Surfaced in the dashboard's Vouchers page
-      as two panels: "charged but not finalized" (Reprocess button) and
-      "stuck pending >20min" (Mark failed button, with an explicit
-      in-UI warning to check IntaSend before using it). Neither panel
-      fixes the root cause, only recovers/corrects orders already
+- [ ] **LIVE INCIDENT, 2026-08-31: IntaSend webhook 100% delivery failure** — `mignon` is Cloudflare Production. IntaSend deactivated the webhook after repeated failures. Compare `INTASEND_WEBHOOK_CHALLENGE`, reactivate the subscription, redeploy, and run a real test purchase. Audit affected orders from 2026-08-21 onward.
+- [ ] Confirm migrations 0002/0003 and dashboard migrations 0004/0005 are applied to the live D1 database.
+- [ ] Confirm all required Production env vars and bindings are configured. Full checklist remains in `INTASEND_SETUP.md`.
+- [ ] Verify real booking/contact submissions and notification emails after deployment.
+- [ ] Complete end-to-end payment confirmation: IntaSend completion → webhook → voucher issuance → email/QR.
+- [ ] **Dashboard user storage:** `DB` must point to `ricaspa-ledger`; apply `0004_dashboard_users.sql` and `0005_dashboard_schema_repair.sql` where needed. `SUPERUSER_SETUP_KEY` must be configured for superuser signup.
 
-      already affected. Once the env var is corrected, new payments
-      should finalize normally via the real webhook again — confirm with
-      a real test purchase before assuming it's fixed.
-- [ ] **Confirm migrations 0002 and 0003 are actually applied to the live
-      D1 database.** Very likely cause of a real production 500 on
-      `/api/book-session` (fixed in code — see below — but the underlying
-      "did the migration run" question is still open). Check via
-      `wrangler d1 migrations list ricaspa-ledger --remote` or the
-      Cloudflare dashboard.
-- [ ] **Confirm every required env var is actually set in Cloudflare.**
-      `STAFF_SECRET` was referenced in code for two sessions without ever
-      being set — don't assume the others are set just because the code
-      references them. **Confirmed 2026-08-24: `BOOKING_NOTIFY_EMAIL` was
-      never set**, which was silently breaking `/api/book-session`'s email
-      send (no crash, just a swallowed failure — logging added, see
-      `AI_HANDOFF.md`). Assume `CONTACT_NOTIFY_EMAIL` is in the same state
-      until checked. Full checklist in `INTASEND_SETUP.md` §0:
-      `INTASEND_PUBLISHABLE_KEY`, `INTASEND_SECRET_KEY`,
-      `INTASEND_WEBHOOK_CHALLENGE`, `RESEND_API_KEY`, `STAFF_SECRET`,
-      `TEST_MODE_SECRET`, `VOUCHER_SIGNING_SECRET`, `BOOKING_NOTIFY_EMAIL`,
-      `CONTACT_NOTIFY_EMAIL`, `TURNSTILE_SECRET_KEY` — plus the `DB` and
-      `VOUCHERS` bindings. Set in the **Production** environment
-      specifically, then redeploy:
-      `npx wrangler pages deploy . --project-name=ricaspa`.
-- [x] **Turnstile site key set** (`0x4AAAAAAEcnrbs179lUlLpV`) in both
-      forms in `index.html`, 2026-08-24. Still need to confirm
-      `TURNSTILE_SECRET_KEY` is set in Cloudflare Production env vars —
-      the site key alone doesn't verify anything server-side, both halves
-      are required (see `AI_HANDOFF.md`'s bot-protection entry).
-- [ ] **New `STAFF_SECRET` issued 2026-08-25** — set it in Cloudflare
-      Production, redeploy, retest both staff pages. This replaces
-      whatever value (if any) was set from the earlier passphrase.
-- [ ] **Verify the booking and contact forms against the real deployment,
-      not just the mock test suite.** `test/booking-contact.test.mjs`
-      passes locally (34/34), but that only proves the code logic — submit
-      both forms for real once deployed and confirm the emails actually
-      land and D1 rows appear.
-- [ ] **End-to-end payment confirmation still not fully verified.** A real
-      M-Pesa STK push was confirmed reaching IntaSend with the correct
-      amount — but the full chain past that point hasn't been proven yet:
-  - [ ] Does the "COMPLETE" event fire and redirect back to `/vouchers?ref=...`?
-  - [ ] Does the webhook actually get called by IntaSend, verify the
-        challenge, and finalize (check: does `completed:REF` appear in KV
-        with a code)?
-  - [ ] Does the buyer actually receive the voucher email, QR included?
-  - [ ] For a gift purchase with a recipient email filled in: does the
-        recipient get the voucher, AND does the buyer get the separate
-        confirmation email?
-  - **How to test:** once sandbox keys are approved, run a full sandbox
-    purchase and check every box above. If sandbox approval is slow, a
-    single real 500 KES purchase covers the same ground.
-- [ ] **Dashboard user storage is not configured (new blocker, 2026-08-27).**
-      The dashboard reports: `Dashboard user storage is not configured.
-      Bind your D1 database as DB and apply migrations/0004_dashboard_users.sql.`
-      The current `mignon` branch contains migrations 0001–0003 but no
-      `0004_dashboard_users.sql`, so this needs to be reconciled before
-      dashboard authentication/user storage can be considered production-ready.
-      First confirm the live Cloudflare Pages/Workers `DB` binding points to
-      `ricaspa-ledger`; then add/apply the intended 0004 schema and retest
-      `/dashboard` login and protected dashboard APIs. Do not mark resolved
-      until the live deployment can authenticate and persist/read dashboard
-      user records successfully.
+## 🟢 Admin V2 — richa-spa-admin-v2
 
-## 🟠 Security & reliability
+- [x] Working branch created from the latest `mignon`; do not use the old `admin-shadcn-integration` branch as the source of truth.
+- [x] Dashboard session storage uses D1 (`dashboard_users`, `dashboard_sessions`, `dashboard_audit_log`).
+- [x] Superuser setup uses a separate `SUPERUSER_SETUP_KEY`; never commit the key.
+- [x] Superuser-only voucher deletion endpoint: `/api/dashboard-delete-voucher` removes the KV voucher and D1 order and writes an audit event. Requires `confirm=true`.
+- [x] Superuser-only offline voucher redemption: `/api/redeem-voucher` updates the KV voucher, D1 `voucher_state`, and audit log.
+- [ ] Wire the delete/redeem controls into the Shadcn dashboard Vouchers UI with confirmation dialogs and role-aware visibility.
+- [ ] Add superuser employee management: approve, disable, role changes, and audit history.
+- [ ] Finish Rica Spa Sign In 2 / Sign Up 2 visual integration.
+- [ ] Replace remaining Shadcn demo identity/branding in the dashboard shell and display `/api/dashboard-me` authenticated user.
 
-- [x] Removed public "Test Mode" checkbox from the live site
-- [x] `/api/create-voucher` requires `X-Test-Secret` header
-- [x] Fixed corrupted `_redirects` file (had debug curl text committed into it by mistake)
-- [x] **Webhook idempotency** — pending record is now claimed (deleted)
-      before finalizing, so a duplicate IntaSend webhook call can't create a
-      second voucher. Failed finalizations are preserved under `failed:REF`
-      instead of being silently lost.
-- [x] **Truthful order states** — `/api/order-status` now returns
-      `pending` / `completed` / `failed` / `unknown` instead of just
-      inferring "completed" from an absent pending record
-- [x] **Buyer confirmation email now checks `response.ok`** — a failed
-      Resend call is recorded (`emailWarning`) instead of silently treated
-      as success
-- [x] **Voucher codes now use `crypto.getRandomValues()`** instead of
-      `Math.random()`
-- [x] **Basic rate limiting** on `/api/initiate-payment`, `/api/book-session`,
-      and `/api/contact-message` (8 attempts per IP per 10 min via KV, each
-      under its own key prefix). Not perfectly precise (KV isn't
-      transactional), but stops casual spam. Cloudflare's dashboard-level
-      Rate Limiting Rules can layer on top for stronger protection later.
-- [x] **Redemption/lookup tool built** — `/staff-vouchers.html`, a simple
-      passphrase-gated page for reception to look up or redeem a code
-      without touching the Cloudflare dashboard. Needs `STAFF_SECRET` env var.
-- [x] **D1 transaction ledger** — every order attempt, finalization
-      state, and email send is recorded in D1 (`orders`, `email_events`),
-      not just KV. Real database provisioned (see `wrangler.toml`).
-- [x] **Signed QR codes on vouchers** — QR encodes `code.signature`
-      (HMAC-SHA256, `VOUCHER_SIGNING_SECRET`), verified at
-      `/api/redeem-voucher` when scanned. Prevents a fabricated/edited QR
-      from being accepted; doesn't rotate over time (that's the deferred
-      "live rotating page" idea below).
-- [x] **Camera QR scanner on `/staff-vouchers.html`** — vendored `jsQR`
-      (Apache-2.0, no CDN dependency), decodes `code.signature`, shows a
-      "✓ verified" badge on a signature match.
-- [x] **Booking + contact forms moved off Web3Forms onto Cloudflare
-      Functions** (`/api/book-session`, `/api/contact-message`) — Resend +
-      D1, same pattern as the rest of the app, no third-party dependency or
-      hardcoded public access keys in client JS.
-- [x] **Bot protection on booking + contact forms** — honeypot field
-      (dropped silently) + Cloudflare Turnstile (verified server-side in
-      `functions/_lib/turnstile.js`). Degrades to honeypot-only rather than
-      blocking every submission if `TURNSTILE_SECRET_KEY` isn't set — but
-      the site key placeholder in `index.html` MUST be replaced before
-      deploy or real submissions silently fail (see 🔴 above).
-- [x] **Fixed a real production 500 on `/api/book-session`** — some D1
-      ledger writes weren't wrapped in try/catch and could throw uncaught
-      after the notify email had already sent. All ledger calls in
-      `book-session.js`/`contact-message.js` now degrade instead of
-      crashing; regression test added.
-- [x] **Slot tracker** — `/staff-bookings.html`, staff-gated (same
-      passphrase as the voucher desk), Today/Upcoming/date views of booking
-      requests with one-tap status updates (confirmed/declined/completed/
-      no-show). Doesn't hard-block double-booking (see 🟡 below for why).
-- [x] **Fixed a stored XSS in `staff-vouchers.html`** — voucher fields
-      (`toName` etc., attacker-controlled via the public purchase form)
-      were interpolated into `innerHTML` unescaped. Added the same
-      `escapeHtml()` pattern `staff-bookings.html` already had.
-- [x] **`book-session.js` now validates `date`/`time` format server-side**
-      (was presence-only, relying on the HTML `<input>` type constraints
-      which a direct POST can bypass) — both the source of the earlier XSS
-      class of bug and now closed at both the input and display ends.
-- [x] **Staff passphrase gate now actually verifies on unlock** —
-      previously showed the desk/tracker UI for ANY non-empty input and
-      only failed on the first real API call. New
-      `functions/api/staff-auth.js` checks immediately; both pages also
-      handle a mid-session 401 (passphrase rotated while logged in) by
-      re-prompting instead of erroring silently. Added `sessionStorage`
-      (not `localStorage`) persistence so a shared front-desk device isn't
-      retyping the passphrase every page refresh.
-- [ ] Error responses still sometimes echo raw internal error strings —
-      fine while debugging, worth trimming before real customers can
-      trigger and see them
-- [ ] Leftover Pesapal env vars still in Cloudflare, unused but uncleaned
-- [ ] `forms/book-a-table.php` and `forms/contact.php` are now fully dead
-      (nothing references them) — safe to delete in a cleanup pass
+## 🟡 Growth / platform
 
-## 🟡 Known gaps / decisions pending
+- [ ] TikTok Pixel: verify base pixel plus explicit `Schedule` on successful booking and `Purchase` only after confirmed payment. Test with TikTok Events Manager and add server-side Events API later if useful.
+- [ ] PWA: manifest, installable icons, service worker, offline fallback, and install UX. Verify 192x192 and 512x512 assets on the deployed site.
+- [ ] SEO: replace important `#book-a-session` sitelink targets with a crawlable booking URL whose destination is the booking form, not the working-hours section. Preserve fragment support only as a compatibility layer.
+- [ ] Remove obsolete PHP form files once references are rechecked.
+- [ ] Confirm card-payment support directly with IntaSend before marketing it.
 
-- [ ] **Card support unconfirmed.** IntaSend's docs contradict each other.
-      M-Pesa works regardless — confirm card status directly with IntaSend
-      before promising "M-Pesa + card" anywhere in marketing
-- [ ] **Discount voucher type** — UI exists (disabled, "Soon"), mechanics
-      never decided
-- [ ] **Live rotating QR page** — deferred follow-up to the static signed
-      QR. Spec'd in `AI_HANDOFF.md` (search "rotating QR"): a "My Voucher"
-      page the email links to, polling a short-lived token endpoint every
-      ~30s so the QR can't just be screenshotted and reused. Not started.
-- [ ] No dashboard/list view of all vouchers sold — only individually
-      queryable in D1 directly (the slot tracker covers this for bookings,
-      not yet done for vouchers)
-- [ ] **Hard double-booking prevention not implemented** — the slot
-      tracker gives staff visibility, but doesn't reject a submission for
-      an already-requested date/time. Left this way deliberately since
-      resource capacity (rooms/therapists) isn't known — see
-      `AI_HANDOFF.md`'s 2026-08-24 entry for the reasoning and how to add
-      it if the business turns out to be single-resource.
-- [ ] **Booking deposit / paid checkout — explicitly deferred, not a
-      priority right now.** Idea: reuse the existing IntaSend + D1 ledger
-      infra (already built for vouchers) to charge a small deposit to
-      confirm a booking slot, instead of "we'll call to confirm." Would
-      also help filter joke submissions as a side effect, but that's now
-      separately handled by Turnstile + honeypot, so this isn't blocking
-      anything — it's a business-model change (paid slot vs. free request)
-      more than a technical one, worth deciding deliberately rather than
-      bundling into a bot-fix pass.
+## 🟠 Security / reliability backlog
 
-- [x] **Google Ads conversion — booking form wired**, 2026-08-25
-      (`assets/js/ads-conversions.js`, fires on the `rica:form-success`
-      event `validate.js` now dispatches on real success).
-- [x] **Google Ads conversion — voucher purchase wired** (`voucher.js`,
-      fires in `pollOrderStatus()` once `status === 'completed'`, guarded
-      by `sessionStorage` so it can't double-fire on refresh). This line
-      previously said it was still outstanding — it isn't; verified
-      against the deployed code 2026-08-29.
-- [ ] **Google Ads conversion — contact form still needs a conversion
-      label from the site owner** (Google Ads → Tools & Settings →
-      Conversions) before it can be wired the same way the booking form
-      is in `ads-conversions.js`. Deliberately parked, 2026-08-29 — not
-      a blocker, just waiting on that label.
-- [x] **Two Meta Pixel IDs both fire on every event** (`1509859970591925`
-      and `2326027024809294`, added 2026-08-28) across `index.html`,
-      `vouchers.html`, `services.html`. **Confirmed intentional 2026-08-29
-      — two separate ad accounts, not a bug.** Don't "clean up" or dedupe
-      this without checking with the site owner first.
-- [ ] **`services.html` is a live but orphaned page** — not linked from
-      the main nav, generic placeholder title, no Google Ads tag, and its
-      booking/contact forms still POST to the dead `forms/book-a-table.php`
-      / `forms/contact.php` PHP handlers (same ones marked dead below).
-      **Left alone deliberately, 2026-08-29** — if anything ever routes
-      traffic there (an old link, a bookmark, an ad), submissions silently
-      fail. Revisit if that page turns out to matter.
+- [ ] Trim raw internal error strings from public responses.
+- [ ] Remove unused Pesapal env vars.
+- [ ] Consider stronger Cloudflare rate limiting in addition to KV-based application limits.
+- [ ] Design the deferred rotating voucher QR / live voucher page.
 
-## ✅ Done
+## Latest admin-v2 changes
 
-- [x] Voucher purchase form (cash amount / specific service / self-gift / gift-someone-else)
-- [x] Real service catalog + server-side price validation
-- [x] Voucher email + separate buyer confirmation email for gifts, with QR code
-- [x] Moved off Pesapal (not licensed in Kenya) to IntaSend (CBK-licensed)
-- [x] Worked around IntaSend's Cloudflare Workers IP block via client-side SDK checkout
-- [x] Clean `/vouchers` URL, linked from the main nav ("Gift Vouchers",
-      between Packages and Contact) as of 2026-08-25. `noindex` left ON
-      deliberately until the live payment flow is proven end-to-end (see
-      🔴 above) — reachable by anyone browsing the site, just not yet
-      surfaced by search engines.
-- [x] Chatway confirmed scoped to `index.html` only — removed from
-      `vouchers.html` 2026-08-25, was never on the staff pages or
-      `services.html` to begin with.
-- [x] Full security/reliability hardening pass (see above)
-- [x] D1 transaction ledger + real database provisioned
-- [x] Signed QR codes + staff camera scanner
-- [x] Booking section retailored (real backend, service dropdown instead of
-      restaurant "Number of People", fixed alt text) and tracked as its own
-      line item through to completion
-- [x] Contact form also moved to a real backend in the same pass (Web3Forms removed)
-- [x] Mock/local test coverage for the full webhook lifecycle (51 checks)
-      and the booking/contact backends (22 checks) — 73/73 passing
+- 2026-09-01: created `richa-spa-admin-v2` from current `mignon`.
+- 2026-09-01: added superuser-only voucher deletion and offline redemption controls at the API layer.
+- 2026-09-01: synchronized offline redemption into the D1 order ledger and audit log.
+
+**Rule:** do not mark deployment or third-party verification complete unless it was actually tested against the live/Preview deployment.
