@@ -1,20 +1,29 @@
 import { getSession } from "./_lib/dashboardAuth.js";
 
 const DASHBOARD_PREFIX = "/dashboard";
-const PUBLIC_DASHBOARD_PATHS = new Set(["/dashboard/login","/dashboard/login.html","/dashboard/signup","/dashboard/signup.html"]);
+const PUBLIC_DASHBOARD_PATHS = new Set([
+  "/dashboard/login",
+  "/dashboard/login.html",
+  "/dashboard/signup",
+  "/dashboard/signup.html",
+]);
 
 export async function onRequest(context) {
   const url = new URL(context.request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
-  if (path.startsWith("/dashboard/assets/") || path.startsWith("/dashboard/images/")) return context.next();
+  if (path.startsWith("/dashboard/assets/") || path.startsWith("/dashboard/images/")) {
+    return context.next();
+  }
 
-  if (path === DASHBOARD_PREFIX || path.startsWith(`${DASHBOARD_PREFIX}/`)) {
+  if (path.startsWith(DASHBOARD_PREFIX + "/") || path === DASHBOARD_PREFIX) {
     if (!PUBLIC_DASHBOARD_PATHS.has(path)) {
       const session = await getSession(context);
       if (!session) {
         const login = new URL("/dashboard/login.html", url.origin);
-        login.searchParams.set("returnTo", path + url.search);
+        // Preserve a requested nested dashboard page, but keep the normal
+        // dashboard logout/login URL clean instead of adding ?returnTo=/dashboard.
+        if (path !== "/dashboard") login.searchParams.set("returnTo", path + url.search);
         return Response.redirect(login.toString(), 302);
       }
     }
