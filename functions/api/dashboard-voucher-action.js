@@ -17,9 +17,9 @@ export async function onRequestPost(context) {
     if (!ref) return json({ error: "Order reference is required" }, 400);
     const order = await getOrder(env, ref);
     if (!order) return json({ error: "Voucher order not found" }, 404);
-    if (order.voucher_code) {
-      await env.VOUCHERS?.delete(order.voucher_code);
-      await env.VOUCHERS?.delete(`voucher-ref:${ref}`);
+    if (order.voucher_code && env.VOUCHERS) {
+      await env.VOUCHERS.delete(order.voucher_code);
+      await env.VOUCHERS.delete(`voucher-ref:${ref}`);
     }
     await deleteVoucherOrder(env, ref);
     await audit(env, user, "voucher.deleted", "order", ref, { voucherCode: order.voucher_code || null });
@@ -37,11 +37,10 @@ export async function onRequestPost(context) {
     voucher.redeemedAt = new Date().toISOString();
     voucher.redeemedBy = user.email;
     await env.VOUCHERS.put(code, JSON.stringify(voucher));
-    if (voucher.ref) {
-      await env.DB?.prepare("UPDATE orders SET voucher_state='redeemed',updated_at=? WHERE ref=?").bind(new Date().toISOString(), voucher.ref).run();
-    }
-    await audit(env, user, "voucher.redeemed", "voucher", code, { ref: voucher.ref || null, offline: true });
-    return json({ ok: true, voucher });
+    const linkedOrder = env.DB ? await env.DB.prepare("SELECT ref FROM orders WHERE voucher_code=?1").bind(code).first() : null;
+    if (linkedOrder) await env.DB.prepare("UPDATE orders SET voucher_state='redeemed',updated_at=? WHERE ref=?").bind(new Date().toISOString(), linkedOrder.ref).run();
+    await audit(env, user, "voucher.redeemed", "voucher", code, { ref: linkedOrder?.ref || null, offline: true });
+    return json({ ok: true, voucher, ref: linkedOrder?.ref || null });
   }
 
   return json({ error: "Unsupported voucher action" }, 400);
