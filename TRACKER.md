@@ -21,11 +21,22 @@
 - [x] Add self-contained Rica Spa Sign In 2 / Sign Up 2 pages so auth is styled even when the React dashboard shell is not loaded.
 - [ ] Replace remaining Shadcn demo identity/branding in the dashboard shell and display `/api/dashboard-me` authenticated user.
 - [x] Remove the dashboard catch-all redirect dependency; middleware remains the private dashboard access boundary.
-- [x] Keep normal logout/login URL clean by omitting `returnTo=/dashboard` for the dashboard root.
 
 ## 🟡 Growth / platform
 
-- [ ] TikTok Pixel: verify base pixel plus explicit `Schedule` on successful booking and `Purchase` only after confirmed payment. Test with TikTok Events Manager and add server-side Events API later if useful.
+### TikTok voucher campaign
+
+- [x] Added server-side TikTok Events API helper at `functions/_lib/tiktokEvents.js`.
+- [x] Emit `Schedule` only after a booking is successfully accepted by the booking notification flow.
+- [x] Emit `Purchase` only after IntaSend `COMPLETE` voucher finalization.
+- [x] Emit `Purchase` for the protected test-voucher path too, so test conversions can be verified.
+- [x] Send `value` as numeric voucher value and `currency` as `KES` on every `Purchase`.
+- [x] Send explicit `event_id` for deduplication and hash email/phone/external ID for matching.
+- [ ] Configure `TIKTOK_PIXEL_ID` and `TIKTOK_ACCESS_TOKEN` in Cloudflare Preview/Production.
+- [ ] Temporarily configure `TIKTOK_TEST_EVENT_CODE` and verify `Schedule` + `Purchase` in TikTok Events Manager Test Events.
+- [ ] After verification, remove the test event code and confirm normal Events Manager reporting.
+- [ ] Confirm campaign/Ads Manager reports the required funnel events and that Purchase value/currency warnings disappear.
+
 - [x] Add PWA manifest, branded install icons, and service worker code. **Not yet deployment-verified; PNG icon variants and browser install testing remain to be completed.**
 - [ ] Add an install UX (`beforeinstallprompt`) where supported and verify installability on Chrome/Android/iOS.
 - [ ] SEO: replace important `#book-a-session` sitelink targets with a crawlable booking URL whose destination is the booking form, not the working-hours section. Preserve fragment support only as a compatibility layer.
@@ -45,7 +56,8 @@
 - 2026-09-01: added superuser-only voucher deletion and offline redemption controls at the API layer.
 - 2026-09-01: synchronized offline redemption into the D1 order ledger and audit log.
 - 2026-09-01: added standalone Rica Spa Sign In 2 / Sign Up 2 pages to prevent unstyled auth screens.
-- 2026-09-01: removed `returnTo=/dashboard` from the normal unauthenticated dashboard-root redirect.
+- 2026-09-01: removed dashboard redirect dependency and kept middleware as the private dashboard access boundary.
 - 2026-09-01: added PWA manifest, SVG install icons, and service worker; live installability remains unverified.
+- 2026-09-04: added server-side TikTok Events API for `Schedule` and voucher `Purchase`, including explicit KES value/currency and event IDs.
 
 **Rule:** do not mark deployment or third-party verification complete unless it was actually tested against the live/Preview deployment.
