@@ -53,7 +53,7 @@
             });
           }
           if (typeof ttq !== 'undefined' && ttq.track) {
-            ttq.track('CompletePayment', {
+            ttq.track('Purchase', {
               value: typeof data.value === 'number' ? data.value : 0,
               currency: 'KES',
               content_type: 'product',

@@ -27,10 +27,9 @@ document.addEventListener('rica:form-success', function (event) {
       fbq('track', 'Schedule');
     }
     if (typeof ttq !== 'undefined' && ttq.track) {
-      // TikTok's standard event set has no booking/appointment-specific
-      // event — 'SubmitForm' is the closest standard event and lets TikTok's
-      // delivery optimize for real booking submissions, not just clicks.
-      ttq.track('SubmitForm', {
+      // 'Schedule' is TikTok's own standard event for appointment bookings —
+      // same semantics as the Meta 'Schedule' event fired just above.
+      ttq.track('Schedule', {
         contents: [{ content_id: 'booking-request', content_name: 'Booking Request' }],
       });
     }
