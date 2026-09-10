@@ -26,12 +26,23 @@ document.addEventListener('rica:form-success', function (event) {
       // lets Meta's ad delivery optimize for actual bookings, not just clicks.
       fbq('track', 'Schedule');
     }
+    if (typeof ttq !== 'undefined' && ttq.track) {
+      // TikTok's standard event set has no booking/appointment-specific
+      // event — 'SubmitForm' is the closest standard event and lets TikTok's
+      // delivery optimize for real booking submissions, not just clicks.
+      ttq.track('SubmitForm', {
+        contents: [{ content_id: 'booking-request', content_name: 'Booking Request' }],
+      });
+    }
     return;
   }
 
   if (action === '/api/contact-message') {
     if (typeof fbq === 'function') {
       fbq('track', 'Contact');
+    }
+    if (typeof ttq !== 'undefined' && ttq.track) {
+      ttq.track('Contact');
     }
     // Still needs its own Google Ads conversion label (Tools & Settings →
     // Conversions) before a gtag call can be added here the same shape as

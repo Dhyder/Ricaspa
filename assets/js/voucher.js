@@ -52,6 +52,17 @@
               content_name: 'Rica Spa Gift Voucher',
             });
           }
+          if (typeof ttq !== 'undefined' && ttq.track) {
+            ttq.track('CompletePayment', {
+              value: typeof data.value === 'number' ? data.value : 0,
+              currency: 'KES',
+              contents: [{
+                content_id: 'rica-spa-gift-voucher',
+                content_type: 'product',
+                content_name: 'Rica Spa Gift Voucher',
+              }],
+            });
+          }
           sessionStorage.setItem(firedKey, '1');
         }
         return;
@@ -197,6 +208,18 @@
       trigger.setAttribute('data-phone_number', cp.phone_number || '');
       trigger.setAttribute('data-first_name', cp.first_name || '');
       trigger.setAttribute('data-api_ref', cp.api_ref);
+
+      if (typeof ttq !== 'undefined' && ttq.track) {
+        ttq.track('InitiateCheckout', {
+          value: typeof cp.amount === 'number' ? cp.amount : Number(cp.amount) || 0,
+          currency: cp.currency || 'KES',
+          contents: [{
+            content_id: 'rica-spa-gift-voucher',
+            content_type: 'product',
+            content_name: 'Rica Spa Gift Voucher',
+          }],
+        });
+      }
 
       const isLive = data.publishableKey && data.publishableKey.startsWith('ISPubKey_live_');
 
