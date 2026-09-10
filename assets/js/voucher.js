@@ -56,9 +56,9 @@
             ttq.track('CompletePayment', {
               value: typeof data.value === 'number' ? data.value : 0,
               currency: 'KES',
+              content_type: 'product',
               contents: [{
                 content_id: 'rica-spa-gift-voucher',
-                content_type: 'product',
                 content_name: 'Rica Spa Gift Voucher',
               }],
             });
@@ -213,9 +213,9 @@
         ttq.track('InitiateCheckout', {
           value: typeof cp.amount === 'number' ? cp.amount : Number(cp.amount) || 0,
           currency: cp.currency || 'KES',
+          content_type: 'product',
           contents: [{
             content_id: 'rica-spa-gift-voucher',
-            content_type: 'product',
             content_name: 'Rica Spa Gift Voucher',
           }],
         });
